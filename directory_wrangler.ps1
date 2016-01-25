@@ -71,7 +71,7 @@ try {
                     $ad_data = (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json").ad_data
                 } catch [System.Exception] {
                     Log $("ERROR: update cms failed on {0}" -f $user.email)
-                    Log $($userjson)
+                    Log $($simpleuser | ConvertTo-Json)
                 }
             }
         } 
