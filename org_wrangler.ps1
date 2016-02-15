@@ -52,31 +52,34 @@ Function smash-groups {
 $org_structure = Invoke-RestMethod ("{0}?org_structure" -f $user_api)
 
 
+# update org unit groups
 try {
     $orgunits = $org_structure.objects | where id -like "db-org_*" | where email -like "*@*"
     Log $("Loading {0} OrgUnit groups..." -f $orgunits.length)
-    $localgroups = Get-DistributionGroup -OrganizationalUnit 'corporateict.domain/Groups/OrgUnit' -ResultSize Unlimited
-    smash-groups -grps $orgunits -localgroups $localgroups -ou 'corporateict.domain/Groups/OrgUnit'
+    $localgroups = Get-DistributionGroup -OrganizationalUnit $org_unit_ou -ResultSize Unlimited
+    smash-groups -grps $orgunits -localgroups $localgroups -ou $org_unit_ou
 } catch [System.Exception] {
     Log "ERROR: Exception caught, skipping rest of OrgUnit"
     Log $($_ | convertto-json)
 }
 
+# update cost centre groups
 try {
     $costcentres = $org_structure.objects | where id -like "db-cc_*" | where email -like "*@*"
     Log $("Loading {0} CostCentre groups..." -f $costcentres.length)
-    $localgroups = Get-DistributionGroup -OrganizationalUnit 'corporateict.domain/Groups/CostCentre' -ResultSize Unlimited
-    smash-groups -grps $costcentres -localgroups $localgroups -ou 'corporateict.domain/Groups/CostCentre'
+    $localgroups = Get-DistributionGroup -OrganizationalUnit $cost_centre_ou -ResultSize Unlimited
+    smash-groups -grps $costcentres -localgroups $localgroups -ou $cost_centre_ou
 } catch [System.Exception] {
     Log "ERROR: Exception caught, skipping rest of CostCentre"
     Log $($_ | convertto-json)
 }
 
+# update location groups
 try {
     $locations = $org_structure.objects | where id -like "db-loc*_*" | where email -like "*@*"
     Log $("Loading {0} Location groups" -f $locations.length)
-    $localgroups = Get-DistributionGroup -OrganizationalUnit 'corporateict.domain/Groups/Location' -ResultSize Unlimited
-    smash-groups -grps $locations -localgroups $localgroups -ou 'corporateict.domain/Groups/Location'
+    $localgroups = Get-DistributionGroup -OrganizationalUnit $location_ou -ResultSize Unlimited
+    smash-groups -grps $locations -localgroups $localgroups -ou $location_ou
 } catch [System.Exception] {
     Log "ERROR: Exception caught, skipping rest of Location"
     Log $($_ | convertto-json)

@@ -12,19 +12,21 @@ $dgrps = Invoke-command -session $session -Command { Get-DistributionGroup -Resu
 Log $("Processing {0} groups" -f $dgrps.Length)
 
 try {
-    Log "Syncing MailSecurity groups"
     # filter the Exchange Online groups list for groups that are "In cloud", and
     # don't include the above org-derived groups (i.e. Alias doesn't have db- prefix)
     $msolgroups = $dgrps | where isdirsynced -eq $false | where Alias -notlike db-* | select @{name="members";expression={Get-MsolGroupMember -All -GroupObjectId $_.ExternalDirectoryObjectId}}, *
-    $localgroups = Get-DistributionGroup -OrganizationalUnit 'corporateict.domain/Groups/MailSecurity' -ResultSize Unlimited
-    # delete groups not online anymore
+    Log $("Syncing {0} MailSecurity groups" -f $msolgroups.length)
+    
+    # fetch all the shadow groups from the local AD
+    $localgroups = Get-DistributionGroup -OrganizationalUnit $mail_security_ou -ResultSize Unlimited
+    # delete any shadow groups where the original is no longer online
     $localgroups | select @{name='exists';expression={$msolgroups | where ExternalDirectoryObjectId -like $_.CustomAttribute1}}, Identity | where exists -eq $null | Remove-DistributionGroup -BypassSecurityGroupManagerCheck -Confirm:$false
-    # create/update rest
+    # create/update the rest of the shadow groups to match Exchange Online
     ForEach ($msolgroup in $msolgroups) {
         $group = $localgroups | where CustomAttribute1 -like $msolgroup.ExternalDirectoryObjectId
         $name = $msolgroup.Alias.replace("`r", "").replace("`n", " ").TrimEnd();
         if (-not $group) { 
-            $group = New-DistributionGroup -OrganizationalUnit 'corporateict.domain/Groups/MailSecurity' -PrimarySmtpAddress $msolgroup.PrimarySmtpAddress -Name $name -Type Security 
+            $group = New-DistributionGroup -OrganizationalUnit $mail_security_ou -PrimarySmtpAddress $msolgroup.PrimarySmtpAddress -Name $name -Type Security 
         }
         Set-DistributionGroup $group -Name $msolgroup.Alias -CustomAttribute1 $msolgroup.ExternalDirectoryObjectId -Alias $msolgroup.Alias -DisplayName $msolgroup.DisplayName -PrimarySmtpAddress $msolgroup.PrimarySmtpAddress
         Update-DistributionGroupMember $group -Members $msolgroup.members.EmailAddress  -BypassSecurityGroupManagerCheck -Confirm:$false

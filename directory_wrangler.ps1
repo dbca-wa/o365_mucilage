@@ -10,20 +10,31 @@ try {
     $mailboxes = $(Get-Mailbox -ResultSize unlimited | select userprincipalname, primarysmtpaddress, recipienttypedetails) + $(Get-RemoteMailbox -ResultSize unlimited | select userprincipalname, primarysmtpaddress, recipienttypedetails)
     $mailboxes | convertto-json > 'C:\cron\mailboxes.json';
     
+    # read the full user DB from OIM CMS. 
     $users = Invoke-RestMethod ("{0}?all" -f $user_api)
+    # do a workaround to vault PowerShell's dumb 10mb JSON limit
     if (-not $users.objects) {
         [void][System.Reflection.Assembly]::LoadWithPartialName("System.Web.Extensions")        
         $json = New-Object -TypeName System.Web.Script.Serialization.JavaScriptSerializer 
         $json.MaxJsonLength = 104857600
         $users = $json.Deserialize($users, [System.Object])
     }
+    
+    # user object attributes we care about
     $keynames = @("Title", "DisplayName", "GivenName", "Surname", "Company", "physicalDeliveryOfficeName", "StreetAddress", "Division", "Department", "Country", "State",
         "wWWHomePage", "Manager", "EmployeeID", "EmployeeNumber", "HomePhone", "telephoneNumber", "Mobile", "Fax")
     $adprops = $keynames + @("EmailAddress", "UserPrincipalName", "Modified", "AccountExpirationDate", "Info")
+    
+    # read the user list from AD. apply a rough filter for accounts we want to load into OIM CMS:
+    # - email address is *.wa.gov.au or dpaw.onmicrosoft.com
+    # - has both a first name and surname
+    # - DN contains a sub-OU called "Users"
+    # - DN does not contain a sub-OU with "Administrators" in the name
     $adusers = Get-ADUser -server $adserver -Filter {EmailAddress -like "*@*wa.gov.au" -and Surname -ne $false} -Properties $adprops | where distinguishedName -Like "*OU=Users*" | where distinguishedName -NotLike "*Administrators*"
     $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@dpaw.onmicrosoft.com"} -Properties $adprops
     Log $("Processing {0} users" -f $adusers.Length)
 
+    # if an AD user doesn't exist in OIM CMS, load the data from current AD record in via the REST API
     ForEach ($aduser in $adusers | where { $_.EmailAddress -notin $users.objects.email }) {
         $simpleuser = $aduser | select ObjectGUID, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Modified, Enabled, AccountExpirationDate
         $simpleuser.Modified = Get-Date $aduser.Modified -Format s
@@ -31,6 +42,7 @@ try {
         $userjson = $simpleuser | ConvertTo-Json
         (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose).ad_data
     }
+
 
     foreach ($user in $users.objects) {
         $aduser = $adusers | where EmailAddress -like $($user.email)
@@ -84,11 +96,16 @@ try {
         }
     }
 
+    # we've done a whole pile of AD changes, so now's a good time to run AADSync to push them to O365
     Log "Azure AD Connect Syncing with O365"
     .'C:\Program Files\Microsoft Azure AD Sync\Bin\DirectorySyncClientCmd.exe' delta
 
+    # finally, we want to do some operations on Office 365 accounts not handled by AADSync
+    # start by reading the full user list 
     $msolusers = get-msoluser -all | select userprincipalname, lastdirsynctime, @{name="licenses";expression={[string]$_.licenses.accountskuid}}, signinname, immutableid, whencreated, displayname, firstname, lastname
     $msolusers | convertto-json > 'C:\cron\msolusers.json';
+
+    # rig the UPN for each user account so that it matches the primary SMTP address.
     foreach ($aduser in $adusers | where {$_.emailaddress -ne $_.userprincipalname}) {
         $immutableid = [System.Convert]::ToBase64String($aduser.ObjectGuid.toByteArray());
         $msoluser = $msolusers | where immutableid -eq $immutableid
@@ -99,6 +116,8 @@ try {
             Log $("Warning: MSOL object not found for {0}" -f $aduser.UserPrincipalName)
         }
     }
+
+
     $mailboxes | where recipienttypedetails -like remoteusermailbox | where { $_.userprincipalname -ne $_.primarysmtpaddress } | foreach { Set-RemoteMailbox $_.userprincipalname -PrimarySmtpAddress $_.userprincipalname -EmailAddressPolicyEnabled $false -Verbose }
 
     ForEach ($msoluser in $msolusers | where lastdirsynctime -eq $null | where licenses) {
