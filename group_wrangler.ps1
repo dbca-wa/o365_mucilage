@@ -19,8 +19,14 @@ try {
     
     # fetch all the shadow groups from the local AD
     $localgroups = Get-DistributionGroup -OrganizationalUnit $mail_security_ou -ResultSize Unlimited
+    
     # delete any shadow groups where the original is no longer online
-    $localgroups | select @{name='exists';expression={$msolgroups | where ExternalDirectoryObjectId -like $_.CustomAttribute1}}, Identity | where exists -eq $null | Remove-DistributionGroup -BypassSecurityGroupManagerCheck -Confirm:$false
+    # WARNING: uncomment below line for occasional purges only! sometimes Office 365 will 
+    # screw up and return only a fraction of the full DistributionGroup list without warning, 
+    # meaning that hundreds of groups will be clobbered then get recreated 10 minutes later. 
+    # which would be fine, except that all your object ACLs point to the SID of the dead group.
+    #$localgroups | select @{name='exists';expression={$msolgroups | where ExternalDirectoryObjectId -like $_.CustomAttribute1}}, Identity | where exists -eq $null | Remove-DistributionGroup -BypassSecurityGroupManagerCheck -Confirm:$false
+    
     # create/update the rest of the shadow groups to match Exchange Online
     ForEach ($msolgroup in $msolgroups) {
         $group = $localgroups | where CustomAttribute1 -like $msolgroup.ExternalDirectoryObjectId
