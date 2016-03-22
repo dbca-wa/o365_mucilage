@@ -1,0 +1,4 @@
+creds.psm1
+*.log*
+*.json
+*.xml
