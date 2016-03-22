@@ -52,7 +52,7 @@ try {
         $aduser = $adusers | where EmailAddress -like $($user.email);
         If ($aduser) {
             # if the OIM CMS user object was modified in the last hour
-            if ($aduser.Modified -lt $((Get-Date $user.date_updated) - (New-TimeSpan -Minutes 60))) {
+            if (($(Get-Date) - (New-TimeSpan -Minutes 60)) -lt $(Get-Date $user.date_updated) -and ($aduser.Modified -lt $(Get-Date $user.date_updated))) {
                 # set all the properties on the AD object to match the OIM CMS object
                 $aduser.Title = $user.title;
                 $aduser.DisplayName, $aduser.GivenName, $aduser.Surname = $user.name, $user.given_name, $user.surname;
