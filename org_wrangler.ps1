@@ -25,14 +25,20 @@ Function smash-groups {
         $name = $grp.name.Substring(0,[System.Math]::Min(64, $grp.name.Length)).replace("`r", "").replace("`n", " ").TrimEnd();
         $id, $email, $dname, $owner = $grp.id, $grp.email, $grp.name, $grp.owner;
         
+        # create Outlook Online group, if it doesn't exist
+        if (-not $ogroup) { 
+            try {
+                $ogroup = Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("New-DistributionGroup -Alias $id -PrimarySmtpAddress $email -Name `"$name`" -Type Security"));
+            } catch [System.Exception] {
+                # bump email and try again
+                $email = $email.split("@")[0]+"-orgunit@"+$email.split("@")[1];
+                $ogroup = Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("New-DistributionGroup -Alias $id -PrimarySmtpAddress $email -Name `"$name`" -Type Security"));
+            }
+        }
+
         # create AD group, if it doesn't exist
         if (-not $group) { 
             $group = New-DistributionGroup -OrganizationalUnit $ou -Alias $id -PrimarySmtpAddress $email -Name $name -Type Security;
-        }
-
-        # create Outlook Online group, if it doesn't exist
-        if (-not $ogroup) { 
-            $ogroup = Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("New-DistributionGroup -Alias $id -PrimarySmtpAddress $email -Name `"$name`" -Type Security"));
         }
 
         # bail out if either of those operations return $null
@@ -42,8 +48,14 @@ Function smash-groups {
 
         # set most of the attributes of the AD and Outlook Online groups to match OIM CMS
         $mtip = "Please contact the Office for Information Management (OIM) to correct membership information for this group.";
-        Set-DistributionGroup $group -Name $name -DisplayName $dname -PrimarySmtpAddress $email -ManagedBy $owner -MailTip $mtip  -BypassSecurityGroupManagerCheck -Confirm:$false;
-        Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-DistributionGroup `"$ogroup`" -Name `"$name`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy `"$owner`" -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
+        try {
+            Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-DistributionGroup `"$id`" -Name `"$name`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy `"$owner`" -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
+        } catch [System.Exception] {
+            # bump email and try again
+            $email = $email.split("@")[0]+"-orgunit@"+$email.split("@")[1];
+            Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-DistributionGroup `"$id`" -Name `"$name`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy `"$owner`" -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
+        }
+        Set-DistributionGroup $id -Name $name -DisplayName $dname -PrimarySmtpAddress $email -ManagedBy $owner -MailTip $mtip  -BypassSecurityGroupManagerCheck -Confirm:$false;
         
         # check for a change in group membership, before doing the expensive update group members operation
         try { 
@@ -60,8 +72,8 @@ Function smash-groups {
         }
 
         # update members of the Outlook Online and AD groups to match OIM CMS
-        Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Update-DistributionGroupMember `"$ogroup`" -Members `"$($grp.members -join '","')`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
-        Update-DistributionGroupMember $group -Members $grp.members  -BypassSecurityGroupManagerCheck -Confirm:$false;
+        Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Update-DistributionGroupMember `"$id`" -Members `"$($grp.members -join '","')`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
+        Update-DistributionGroupMember $id -Members $grp.members  -BypassSecurityGroupManagerCheck -Confirm:$false;
     }
 }
 
