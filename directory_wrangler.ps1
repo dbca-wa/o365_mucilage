@@ -123,7 +123,10 @@ try {
 
     # we've done a whole pile of AD changes, so now's a good time to run AADSync to push them to O365
     Log "Azure AD Connect Syncing with O365";
-    .'C:\Program Files\Microsoft Azure AD Sync\Bin\DirectorySyncClientCmd.exe' delta;
+    Start-ADSyncSyncCycle -PolicyType Delta;
+    # this command is not blocking, and the new AAD Connect API is crap at polling for activity
+    # so let's just block for 60 seconds!
+    Start-Sleep -s 60;
 
     # finally, we want to do some operations on Office 365 accounts not handled by AADSync
     # start by reading the full user list 
@@ -142,10 +145,16 @@ try {
         }
     }
 
+    # for each Exchange Online mailbox that doesn't have it, add an archive mailbox
+    $mailboxes | where recipienttypedetails -like remoteusermailbox | where { $_.archivestatus -eq "None" } | foreach { 
+        Enable-RemoteMailbox -Identity $_.userprincipalname -Archive;
+    }
+
     # for each Exchange Online mailbox where it doesn't match, set the PrimarySmtpAddress to match the UserPrincipalName
     $mailboxes | where recipienttypedetails -like remoteusermailbox | where { $_.userprincipalname -ne $_.primarysmtpaddress } | foreach { 
         Set-RemoteMailbox $_.userprincipalname -PrimarySmtpAddress $_.userprincipalname -EmailAddressPolicyEnabled $false -Verbose;
     }
+    
     # for each "In cloud" user in Azure AD which is licensed
     ForEach ($msoluser in $msolusers | where lastdirsynctime -eq $null | where licenses) {
         $username = $msoluser.FirstName + $msoluser.LastName;
