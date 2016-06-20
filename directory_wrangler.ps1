@@ -12,10 +12,10 @@ try {
     $mailboxes | convertto-json > 'C:\cron\mailboxes.json';
     
     # read the full user DB from OIM CMS. 
-    $users = Invoke-RestMethod ("{0}?all" -f $user_api);
+    $users = Invoke-RestMethod ("{0}?all" -f $user_api) -WebSession $oimsession;
     # do a workaround to vault PowerShell's dumb 10mb JSON limit
     if (-not $users.objects) {
-        [void][System.Reflection.Assembly]::LoadWithPartialName("System.Web.Extensions");      
+        [void][System.Reflection.Assembly]::LoadWithPartialName("System.Web.Extensions");
         $json = New-Object -TypeName System.Web.Script.Serialization.JavaScriptSerializer;
         $json.MaxJsonLength = 104857600;
         $users = $json.Deserialize($users, [System.Object]);
@@ -43,7 +43,7 @@ try {
             $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
         }
         $userjson = $simpleuser | ConvertTo-Json;
-        (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose).ad_data;
+        (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession).ad_data;
     }
 
     # for each OIM CMS DepartmentUser
@@ -82,7 +82,7 @@ try {
                     Set-ADUser -verbose -server $adserver -instance $aduser;
                     # thumbnailPhoto isn't added as a property of $aduser for some dumb reason, so we have to push it seperately
                     #if ($user.photo_ad -and $user.photo_ad.startswith('http')) {
-                    #    Set-ADUser -verbose -server $adserver $aduser -replace @{thumbnailPhoto=$(Invoke-WebRequest $user.photo_ad).content};
+                    #    Set-ADUser -verbose -server $adserver $aduser -replace @{thumbnailPhoto=$(Invoke-WebRequest $user.photo_ad -WebSession $oimsession).content};
                     #}
 
                 } catch [System.Exception] {
@@ -104,7 +104,7 @@ try {
                 # convert the whole lot to JSON and push to OIM CMS
                 $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
                 try {
-                    $ad_data = (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json").ad_data;
+                    $ad_data = (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -WebSession $oimsession).ad_data;
                 } catch [System.Exception] {
                     Log $("ERROR: update cms failed on {0}" -f $user.email);
                     Log $($simpleuser | ConvertTo-Json);
@@ -116,7 +116,7 @@ try {
         if ((-not $aduser) -or ($aduser.enabled -eq $false)) {
             if (-not $user.ad_deleted) {
                 $userjson = [System.Text.Encoding]::UTF8.GetBytes($(@{EmailAddress = $user.email;Deleted = $true} | convertto-json));
-                $ad_data = (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose).ad_data;
+                $ad_data = (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession).ad_data;
             }
         }
     }

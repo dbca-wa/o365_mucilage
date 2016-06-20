@@ -29,5 +29,8 @@ Connect-ExchangeServer -Auto;
 $session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri https://outlook.office365.com/powershell-liveid/ -Credential $cred -Authentication Basic -AllowRedirection;
 Connect-MsolService -Credential $cred;
 
+# Basic auth stuff
+$basicAuthValue = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("user:pass"))
+$Headers = @{Authorization = $basicAuthValue}
 
 Export-ModuleMember -Function * -Variable *;

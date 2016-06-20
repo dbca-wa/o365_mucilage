@@ -77,8 +77,12 @@ Function smash-groups {
     }
 }
 
+# Start with a result of success
+$result = "Success";
+$result | Out-File "C:\cron\org_wrangler_result.txt";
+
 # download org structure as JSON from OIM CMS
-$org_structure = Invoke-RestMethod ("{0}?org_structure" -f $user_api);
+$org_structure = Invoke-RestMethod ("{0}?org_structure" -f $user_api) -WebSession $oimsession;
 
 
 # update org unit groups
@@ -90,6 +94,8 @@ try {
 } catch [System.Exception] {
     Log "ERROR: Exception caught, skipping rest of OrgUnit";
     Log $($_ | convertto-json);
+    $result = "Failure"
+    $result | Out-File "C:\cron\org_wrangler_result.txt"
 }
 
 # update cost centre groups
@@ -101,6 +107,8 @@ try {
 } catch [System.Exception] {
     Log "ERROR: Exception caught, skipping rest of CostCentre";
     Log $($_ | convertto-json);
+    $result = "Failure"
+    $result | Out-File "C:\cron\org_wrangler_result.txt"
 }
 
 # update location groups
@@ -112,12 +120,16 @@ try {
 } catch [System.Exception] {
     Log "ERROR: Exception caught, skipping rest of Location";
     Log $($_ | convertto-json);
+    $result = "Failure"
+    $result | Out-File "C:\cron\org_wrangler_result.txt"
 }
 
 # cache org structure
 $org_structure | convertto-json > C:\cron\org_structure.json;
 
 Log "Finished";
+$result = "Hello world"
+$result | Out-File "C:\cron\org_wrangler_result.txt"
 
 # cleanup
 Get-PSSession | Remove-PSSession;
