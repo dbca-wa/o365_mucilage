@@ -31,6 +31,6 @@ Connect-MsolService -Credential $cred;
 
 # Basic auth stuff
 $basicAuthValue = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("user:pass"))
-$Headers = @{Authorization = $basicAuthValue}
+$Headers = @{Authorization = "Basic $basicAuthValue"}
 
 Export-ModuleMember -Function * -Variable *;
