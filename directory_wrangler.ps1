@@ -1,4 +1,5 @@
-﻿Import-Module -Force 'C:\cron\creds.psm1';
+﻿Import-Module ActiveDirectory;
+Import-Module -Force 'C:\cron\creds.psm1';
 $ErrorActionPreference = "Stop";
 
 Function Log {
@@ -7,6 +8,9 @@ Function Log {
 }
 
 try {
+    # Store the domain max password age in days.
+    $DefaultmaxPasswordAgeDays = (Get-ADDefaultDomainPasswordPolicy).MaxPasswordAge.Days;
+
     # get all the mailbox records (local Mailboxes and Office 365 RemoteMailboxes)
     $mailboxes = $(Get-Mailbox -ResultSize unlimited | select userprincipalname, primarysmtpaddress, recipienttypedetails) + $(Get-RemoteMailbox -ResultSize unlimited | select userprincipalname, primarysmtpaddress, recipienttypedetails);
     $mailboxes | convertto-json > 'C:\cron\mailboxes.json';
@@ -24,7 +28,7 @@ try {
     # user object attributes we care about
     $keynames = @("Title", "DisplayName", "GivenName", "Surname", "Company", "physicalDeliveryOfficeName", "StreetAddress", "Division", "Department", "Country", "State",
         "wWWHomePage", "Manager", "EmployeeID", "EmployeeNumber", "HomePhone", "telephoneNumber", "Mobile", "Fax");
-    $adprops = $keynames + @("EmailAddress", "UserPrincipalName", "Modified", "AccountExpirationDate", "Info");
+    $adprops = $keynames + @("EmailAddress", "UserPrincipalName", "Modified", "AccountExpirationDate", "Info", "pwdLastSet");
     
     # read the user list from AD. apply a rough filter for accounts we want to load into OIM CMS:
     # - email address is *.wa.gov.au or dpaw.onmicrosoft.com
@@ -35,13 +39,14 @@ try {
     $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@dpaw.onmicrosoft.com"} -Properties $adprops;
     Log $("Processing {0} users" -f $adusers.Length);
 
-    # if an AD user doesn't exist in OIM CMS, load the data from current AD record in via the REST API
+    # If an AD user doesn't exist in OIM CMS, load the data from current AD record in via the REST API
     ForEach ($aduser in $adusers | where { $_.EmailAddress -notin $users.objects.email }) {
-        $simpleuser = $aduser | select ObjectGUID, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Modified, Enabled, AccountExpirationDate;
+        $simpleuser = $aduser | select ObjectGUID, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Modified, Enabled, AccountExpirationDate, pwdLastSet;
         $simpleuser.Modified = Get-Date $aduser.Modified -Format s;
         if ($aduser.AccountExpirationDate) { 
             $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
         }
+        $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
         $userjson = $simpleuser | ConvertTo-Json;
         (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession).ad_data;
     }
@@ -97,7 +102,8 @@ try {
                 # find the mailbox object
                 $mb = $mailboxes | where userprincipalname -like $user.email;
                 # glom the mailbox object onto the AD object
-                $simpleuser = $aduser | select ObjectGUID, @{name="mailbox";expression={$mb}}, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate;
+                $simpleuser = $aduser | select ObjectGUID, @{name="mailbox";expression={$mb}}, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
+                $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
                 if ($aduser.AccountExpirationDate) { 
                     $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
                 }
