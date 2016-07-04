@@ -180,7 +180,7 @@ try {
         sleep 10;
         Set-ADUser -Identity $username -Add @{'proxyAddresses'='SMTP:'+$msoluser.UserPrincipalName};
         # add remotemailbox object, RemoteRoutingAddress starts out wrong! needs to be fixed to dpaw.mail.onmicrosoft.com, once proxyaddresses updates
-        Enable-RemoteMailbox -Identity $msoluser.UserPrincipalName -RemoteRoutingAddress $msoluser.UserPrincipalName;
+        Enable-RemoteMailbox -Identity $msoluser.UserPrincipalName -PrimarySmtpAddress $msoluser.UserPrincipalName -RemoteRoutingAddress $msoluser.UserPrincipalName;
     }
 
     # quick loop to fix RemteRoutingAddress; previously some RemoteMailbox objects were provisioned manually with the wrong one
