@@ -178,9 +178,12 @@ try {
         New-ADUser $username -Verbose -Path "OU=Users,OU=DPaW,dc=corporateict,dc=domain" -Enabled $true -UserPrincipalName $msoluser.UserPrincipalName -EmailAddress $msoluser.UserPrincipalName -DisplayName $msoluser.DisplayName -GivenName $msoluser.FirstName -Surname $msoluser.LastName -PasswordNotRequired $true;
         # wait for changes to propagate
         sleep 10;
+        # assume RemoteRoutingAddress name is the same base as the UPN
+        $rra = $msoluser.UserPrincipalName.Split("@", 2)[0]+"@dpaw.mail.onmicrosoft.com";
         Set-ADUser -Identity $username -Add @{'proxyAddresses'='SMTP:'+$msoluser.UserPrincipalName};
-        # add remotemailbox object, RemoteRoutingAddress starts out wrong! needs to be fixed to dpaw.mail.onmicrosoft.com, once proxyaddresses updates
-        Enable-RemoteMailbox -Identity $msoluser.UserPrincipalName -PrimarySmtpAddress $msoluser.UserPrincipalName -RemoteRoutingAddress $msoluser.UserPrincipalName;
+        Set-ADUser -Identity $username -Add @{'proxyAddresses'='smtp:'+$rra};
+        # add remotemailbox object
+        Enable-RemoteMailbox -Identity $msoluser.UserPrincipalName -PrimarySmtpAddress $msoluser.UserPrincipalName -RemoteRoutingAddress $rra;
     }
 
     # quick loop to fix RemteRoutingAddress; previously some RemoteMailbox objects were provisioned manually with the wrong one
