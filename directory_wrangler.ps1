@@ -164,6 +164,9 @@ try {
     # for each "In cloud" user in Azure AD which is licensed
     ForEach ($msoluser in $msolusers | where lastdirsynctime -eq $null | where licenses) {
         $username = $msoluser.FirstName + $msoluser.LastName;
+        if (!$username) {
+            $username = $msoluser.UserPrincipalName.Split("@", 2)[0]
+        }
         $username = $username.Substring(0,[System.Math]::Min(15, $username.Length));
         # link existing users
         $upn = $msoluser.UserPrincipalName;
