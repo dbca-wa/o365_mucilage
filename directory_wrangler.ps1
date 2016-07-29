@@ -69,7 +69,7 @@ try {
                     $aduser.Department = $user.org_data.units[0].name; 
                 }
                 $aduser.Country, $aduser.State = "AU", "Western Australia";
-                $aduser.wWWHomePage = "https://oim.dpaw.wa.gov.au/userinfo?email=" + $user.email;
+                $aduser.wWWHomePage = "https://oim.dpaw.wa.gov.au/address-book/user-details?email=" + $user.email;
                 $aduser.EmployeeNumber, $aduser.EmployeeID = $user.employee_id, $user.employee_id;
                 $aduser.telephoneNumber, $aduser.Mobile = $user.telephone, $user.mobile_phone;
                 $aduser.Fax = $user.org_unit__location__fax;
@@ -97,7 +97,7 @@ try {
                     Log $($except | convertto-json);
                 }
             }
-            # if the AD object was modified after the OIM CMS object
+            # If the AD object was modified after the OIM CMS object, sync to that system
             if ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified)) {
                 # find the mailbox object
                 $mb = $mailboxes | where userprincipalname -like $user.email;
@@ -112,17 +112,23 @@ try {
                 try {
                     $ad_data = (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -WebSession $oimsession).ad_data;
                 } catch [System.Exception] {
-                    Log $("ERROR: update cms failed on {0}" -f $user.email);
+                    Log $("ERROR: update OIM CMS failed on {0}" -f $user.email);
                     Log $($simpleuser | ConvertTo-Json);
                 }
             }
         } 
 
-        # if user is enabled, update AD data field in OIM CMS
+        # If the user is enabled, update AD data field in OIM CMS
         if ((-not $aduser) -or ($aduser.enabled -eq $false)) {
             if (-not $user.ad_deleted) {
-                $userjson = [System.Text.Encoding]::UTF8.GetBytes($(@{EmailAddress = $user.email;Deleted = $true} | convertto-json));
-                $ad_data = (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession).ad_data;
+                $simpleuser = $aduser | select ObjectGUID, @{name="mailbox";expression={$mb}}, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
+                $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
+                try {
+                    $ad_data = (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession).ad_data;
+                } catch [System.Exception] {
+                    Log $("ERROR: update OIM CMS failed on {0}" -f $user.email);
+                    Log $($simpleuser | ConvertTo-Json);
+                }
             }
         }
     }

@@ -82,7 +82,7 @@ $result = "Success";
 $result | Out-File "C:\cron\org_wrangler_result.txt";
 
 # download org structure as JSON from OIM CMS
-$org_structure = Invoke-RestMethod ("{0}?org_structure" -f $user_api) -WebSession $oimsession;
+$org_structure = Invoke-RestMethod ("{0}?org_structure=true&sync_o365=true" -f $user_api) -WebSession $oimsession;
 
 
 # update org unit groups
