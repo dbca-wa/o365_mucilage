@@ -119,7 +119,7 @@ try {
         } 
 
         # If the user is enabled, update AD data field in OIM CMS
-        if ((-not $aduser) -or ($aduser.enabled -eq $false)) {
+        if (($aduser.enabled -eq $false)) {
             if (-not $user.ad_deleted) {
                 $simpleuser = $aduser | select ObjectGUID, @{name="mailbox";expression={$mb}}, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
                 $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
