@@ -27,7 +27,7 @@ try {
     
     # user object attributes we care about
     $keynames = @("Title", "DisplayName", "GivenName", "Surname", "Company", "physicalDeliveryOfficeName", "StreetAddress", "Division", "Department", "Country", "State",
-        "wWWHomePage", "Manager", "EmployeeID", "EmployeeNumber", "HomePhone", "telephoneNumber", "Mobile", "Fax");
+        "wWWHomePage", "Manager", "EmployeeID", "EmployeeNumber", "HomePhone", "telephoneNumber", "Mobile", "Fax", "employeeType");
     $adprops = $keynames + @("EmailAddress", "UserPrincipalName", "Modified", "AccountExpirationDate", "Info", "pwdLastSet");
     
     # read the user list from AD. apply a rough filter for accounts we want to load into OIM CMS:
@@ -41,7 +41,7 @@ try {
 
     # If an AD user doesn't exist in OIM CMS, load the data from current AD record in via the REST API
     ForEach ($aduser in $adusers | where { $_.EmailAddress -notin $users.objects.email }) {
-        $simpleuser = $aduser | select ObjectGUID, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Modified, Enabled, AccountExpirationDate, pwdLastSet;
+        $simpleuser = $aduser | select ObjectGUID, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Modified, Enabled, AccountExpirationDate, pwdLastSet, employeeType;
         $simpleuser.Modified = Get-Date $aduser.Modified -Format s;
         if ($aduser.AccountExpirationDate) { 
             $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
@@ -73,6 +73,7 @@ try {
                 $aduser.EmployeeNumber, $aduser.EmployeeID = $user.employee_id, $user.employee_id;
                 $aduser.telephoneNumber, $aduser.Mobile = $user.telephone, $user.mobile_phone;
                 $aduser.Fax = $user.org_unit__location__fax;
+                $aduser.employeeType = $user.account_type + " " + $user.position_type;
                 if ($user.parent__email -ne ($adusers | where distinguishedname -like $aduser.Manager).emailaddress) {
                     $aduser.Manager = ($adusers | where emailaddress -like $($user.parent__email)).DistinguishedName;
                 }
@@ -86,10 +87,12 @@ try {
                 try {
                     Set-ADUser -verbose -server $adserver -instance $aduser;
                     # thumbnailPhoto isn't added as a property of $aduser for some dumb reason, so we have to push it seperately
-                    #if ($user.photo_ad -and $user.photo_ad.startswith('http')) {
-                    #    Set-ADUser -verbose -server $adserver $aduser -replace @{thumbnailPhoto=$(Invoke-WebRequest $user.photo_ad -WebSession $oimsession).content};
-                    #}
-
+                    if ($user.photo_ad -and $user.photo_ad.startswith('http')) {
+                        Set-ADUser -verbose -server $adserver $aduser -replace @{thumbnailPhoto=$(Invoke-WebRequest $user.photo_ad -WebSession $oimsession).content};
+                    }
+                    else {
+                        Set-ADUser -verbose -server $adserver $aduser -clear thumbnailPhoto;
+                    }
                 } catch [System.Exception] {
                     Log $("ERROR: set-aduser failed on {0}" -f $user.email);
                     Log $($aduser | select $($aduser.ModifiedProperties) | convertto-json);
