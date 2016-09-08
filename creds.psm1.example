@@ -1,6 +1,6 @@
 ﻿
 # OIM CMS private API endpoint for users
-$user_api = "https://oim_cms.example.com/api/secret/users";
+$user_api = "https://oim_cms.example.com/api/users";
 
 # hostname of nearest Active Directory DC
 $adserver = "dc-001";
@@ -30,7 +30,9 @@ $session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri ht
 Connect-MsolService -Credential $cred;
 
 # Basic auth stuff
-$basicAuthValue = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("user:pass"))
-$Headers = @{Authorization = "Basic $basicAuthValue"}
+$basicAuthValue = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("user:pass"));
+$authHeaders = @{Authorization = "Basic $basicAuthValue"};
+
+Invoke-WebRequest "https://oim.dpaw.wa.gov.au/auth" -Headers $authHeaders -SessionVariable oimsession;
 
 Export-ModuleMember -Function * -Variable *;
