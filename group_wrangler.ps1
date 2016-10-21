@@ -35,7 +35,9 @@ try {
             $group = New-DistributionGroup -OrganizationalUnit $mail_security_ou -PrimarySmtpAddress $msolgroup.PrimarySmtpAddress -Name $name -Type Security;
         }
         Set-DistributionGroup $group -Name $msolgroup.Alias -CustomAttribute1 $msolgroup.ExternalDirectoryObjectId -Alias $msolgroup.Alias -DisplayName $msolgroup.DisplayName -PrimarySmtpAddress $msolgroup.PrimarySmtpAddress;
-        Update-DistributionGroupMember $group -Members $msolgroup.members.EmailAddress  -BypassSecurityGroupManagerCheck -Confirm:$false;
+        # only bother updating distribution group users which are synced to on-prem AD
+        $member_subset = $msolgroup.members | Where LastDirSyncTime;
+        Update-DistributionGroupMember $group -Members $member_subset.EmailAddress  -BypassSecurityGroupManagerCheck -Confirm:$false;
         
         # we need to ensure an admin group is added as an owner the O365 group object. 
         # why? because without this, even God Mode Exchange admins can't use ECP to manage the group owners! 
