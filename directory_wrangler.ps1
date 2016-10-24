@@ -125,17 +125,19 @@ try {
             }
         } 
         Else {
-            # No AD object found - mark the user as "AD deleted" in the CMS.
-            $body = @{EmailAddress=$user.email; Deleted="true"};
-            $jsonbody = $body | ConvertTo-Json;
-            try {
-                # Invoke the API.
-                $response = Invoke-RestMethod $user_api -Method Post -Body $jsonbody -ContentType "application/json" -WebSession $oimsession -Verbose;
-                Log $("INFO: updated OIM CMS user {0} as deleted in Active Directory" -f $user.email);
-            } catch [System.Exception] {
-                # Log any failures to sync AD data into the OIM CMS, for reference.
-                Log $("ERROR: failed to update OIM CMS user {0} as deleted in Active Directory" -f $user.email);
-                Log $($jsonbody);
+            # No AD object found - mark the user as "AD deleted" in the CMS (if it's not already).
+            If (-Not $user.ad_deleted) {
+                $body = @{EmailAddress=$user.email; Deleted="true"};
+                $jsonbody = $body | ConvertTo-Json;
+                try {
+                    # Invoke the API.
+                    $response = Invoke-RestMethod $user_api -Method Post -Body $jsonbody -ContentType "application/json" -WebSession $oimsession -Verbose;
+                    Log $("INFO: updated OIM CMS user {0} as deleted in Active Directory" -f $user.email);
+                } catch [System.Exception] {
+                    # Log any failures to sync AD data into the OIM CMS, for reference.
+                    Log $("ERROR: failed to update OIM CMS user {0} as deleted in Active Directory" -f $user.email);
+                    Log $($jsonbody);
+                }
             }
         }
         # If the user is enabled in AD, update AD data field in OIM CMS.
