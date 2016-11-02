@@ -103,7 +103,7 @@ try {
                 }
             }
             # If the AD object was modified after the OIM CMS object, sync back to the CMS...
-            if ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified)) {
+            if (('Modified' -notin $user.ad_data) -or ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified))) {
                 # ...find the mailbox object
                 $mb = $mailboxes | where userprincipalname -like $user.email;
                 # ...glom the mailbox object onto the AD object
@@ -120,6 +120,7 @@ try {
                 } catch [System.Exception] {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
                     Log $("ERROR: update OIM CMS failed on {0}" -f $user.email);
+                    Log $_.Exception.ToString();
                     Log $($simpleuser | ConvertTo-Json);
                 }
             }
@@ -136,6 +137,7 @@ try {
                 } catch [System.Exception] {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
                     Log $("ERROR: failed to update OIM CMS user {0} as deleted in Active Directory" -f $user.email);
+                    Log $_.Exception.ToString();
                     Log $($jsonbody);
                 }
             }
@@ -144,13 +146,17 @@ try {
         if ($aduser.enabled -eq $false) {
             if (-not $user.ad_deleted) {
                 $simpleuser = $aduser | select ObjectGUID, @{name="mailbox";expression={$mb}}, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
+                if ($aduser.AccountExpirationDate) { 
+                    $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
+                }
                 $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
                 try {
                     # Invoke the API.
                     $ad_data = (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession).ad_data;
                 } catch [System.Exception] {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
-                    Log $("ERROR: update OIM CMS failed on {0}" -f $user.email);
+                    Log $("ERROR: update AD data in OIM CMS failed on {0}" -f $user.email);
+                    Log $_.Exception.ToString();
                     Log $($simpleuser | ConvertTo-Json);
                 }
             }
