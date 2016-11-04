@@ -27,8 +27,9 @@ try {
     }
     
     # Define user object attributes that we care about.
-    $keynames = @("Title", "DisplayName", "GivenName", "Surname", "Company", "physicalDeliveryOfficeName", "StreetAddress", "Division", "Department", "Country", "State",
-        "wWWHomePage", "Manager", "EmployeeID", "EmployeeNumber", "HomePhone", "telephoneNumber", "Mobile", "Fax", "employeeType");
+    $keynames = @("Title", "DisplayName", "GivenName", "Surname", "Company", "physicalDeliveryOfficeName", "StreetAddress", 
+        "Division", "Department", "Country", "State", "wWWHomePage", "Manager", "EmployeeID", "EmployeeNumber", "HomePhone",
+        "telephoneNumber", "Mobile", "Fax", "employeeType");
     $adprops = $keynames + @("EmailAddress", "UserPrincipalName", "Modified", "AccountExpirationDate", "Info", "pwdLastSet");
     
     # Read the user list from AD. Apply a rough filter for accounts we want to load into OIM CMS:
@@ -48,7 +49,10 @@ try {
             $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
         }
         $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
-        $userjson = $simpleuser | ConvertTo-Json;
+        # For every push to the API, we need to explicitly convert to UTF8 bytes
+        # to avoid the stupid moon-man encoding Windows uses for strings. 
+        # Without this, e.g. users with Unicode names will fail as the server expects UTF8.
+        $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
         # Here we POST to the API endpoint to create a new DepartmentUser in the CMS.
         (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession).ad_data;
     }
@@ -114,9 +118,10 @@ try {
                 }
                 # ...convert the whole lot to JSON and push to OIM CMS via the REST API.
                 $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
+  
                 try {
                     # Invoke the API.
-                    $ad_data = (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -WebSession $oimsession).ad_data;
+                    $response = Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -WebSession $oimsession;
                 } catch [System.Exception] {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
                     Log $("ERROR: update OIM CMS failed on {0}" -f $user.email);
@@ -129,7 +134,7 @@ try {
             # No AD object found - mark the user as "AD deleted" in the CMS (if it's not already).
             If (-Not $user.ad_deleted) {
                 $body = @{EmailAddress=$user.email; Deleted="true"};
-                $jsonbody = $body | ConvertTo-Json;
+                $jsonbody = [System.Text.Encoding]::UTF8.GetBytes($($body | ConvertTo-Json));
                 try {
                     # Invoke the API.
                     $response = Invoke-RestMethod $user_api -Method Post -Body $jsonbody -ContentType "application/json" -WebSession $oimsession -Verbose;
@@ -142,17 +147,19 @@ try {
                 }
             }
         }
-        # If the user is enabled in AD, update AD data field in OIM CMS.
+        # If the user is disabled in AD but still marked active in the OIM CMS, update the user in the CMS.
         if ($aduser.enabled -eq $false) {
-            if (-not $user.ad_deleted) {
-                $simpleuser = $aduser | select ObjectGUID, @{name="mailbox";expression={$mb}}, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
+            if ($user.active) {
+                Log $("Marking {0} as 'Inactive' in the OIM CMS" -f $user.email);
+                $simpleuser = $aduser | select ObjectGUID,  info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
                 if ($aduser.AccountExpirationDate) { 
                     $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
                 }
                 $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
+                
                 try {
                     # Invoke the API.
-                    $ad_data = (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession).ad_data;
+                    $response = Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession;
                 } catch [System.Exception] {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
                     Log $("ERROR: update AD data in OIM CMS failed on {0}" -f $user.email);
