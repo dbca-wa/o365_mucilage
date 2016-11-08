@@ -34,13 +34,14 @@ try {
         # If the CMS user data differs here, invoke the API and update the object.
         If ($body.o365_licence -ne $cmsUser.o365_licence) {
             $jsonbody = $body | ConvertTo-Json;
+            $user_update_api = $user_api + '{0}/' -f $cmsUser.ad_guid;
             try {
                 # Invoke the API.
-                $response = Invoke-RestMethod $user_api -Method Post -Body $jsonbody -ContentType "application/json" -WebSession $oimsession -Verbose;
+                $response = Invoke-RestMethod $user_update_api -Method Put -Body $jsonbody -ContentType "application/json" -WebSession $oimsession -Verbose;
                 Log $("INFO: updated OIM CMS user {0} as having an O365 licence" -f $cmsUser.email);
             } catch [System.Exception] {
                 # Log any failures to sync AD data into the OIM CMS, for reference.
-                Log $("ERROR: failed to update OIM CMS user {0}" -f $cmsUser.email);
+                Log $("ERROR: failed to update OIM CMS user {0} as having an O365 licence" -f $cmsUser.email);
                 Log $($jsonbody);
             }
         }
