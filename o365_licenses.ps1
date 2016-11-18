@@ -22,31 +22,35 @@ try {
     }
     # Iterate through each CMS user, updating as required.
     foreach ($cmsUser in $cmsUsers.objects) {
-        $body = @{email=$cmsUser.email; o365_licence=$cmsUser.o365_licence};
-        # Case 0: if the CMS user O365 licence status is currently unknown, consider it to be "False".
-        If (!$body.o365_licence) {
+        $updateUser = $False;
+        $body = @{email=$cmsUser.email};
+        # If the CMS user O365 licence status is currently unknown, consider it to be "False" and flag for an update.
+        If ($cmsUser.o365_licence -eq $null) {
             $body.o365_licence = $False;
+            $updateUser = $True;
+        } Else {
+            $body.o365_licence = $cmsUser.o365_licence;
         }
+
         # Case 1: if the CMS user IS present in the list of licenced users and IS NOT marked "licenced".
         If ((-Not $cmsUser.o365_licence) -And ($licencedUsers -Match $cmsUser.email)) {
             $body.o365_licence = $True;
+            $updateUser = $True;
+
         }
-        # Case 2: if the CMS user is not present in the list of licenced users and is marked "licenced":
+        # Case 2: if the CMS user IS NOT present in the list of licenced users and IS marked "licenced":
         If (($cmsUser.o365_licence) -And (-Not $licencedUsers -Match $cmsUser.email)) {
             $body.o365_licence = $False;
+            $updateUser = $True;
         }
-        # Case 3: if the CMS user is not present in the list of licenced users.
-        If (-Not $licencedUsers -Match $cmsUser.email) {
-            $body.o365_licence = $False;
-        }
-        # If the CMS user status differs, invoke the API and update the object.
-        If (($body.o365_licence -ne $cmsUser.o365_licence) -or (-Not $body.o365_licence)) {
+        # If the CMS user is flagged for an update, invoke the API and update the object.
+        If ($updateUser) {
             $jsonbody = $body | ConvertTo-Json;
             $user_update_api = $user_api + '{0}/' -f $cmsUser.ad_guid;
             try {
                 # Invoke the API.
                 $response = Invoke-RestMethod $user_update_api -Method Put -Body $jsonbody -ContentType "application/json" -WebSession $oimsession -Verbose;
-                Log $("INFO: updated OIM CMS user {0} O365 licence status" -f $cmsUser.email);
+                Log $("INFO: updated OIM CMS user {0} O365 licence status: {1}" -f $cmsUser.email, $cmsUser.o365_licence);
             } catch [System.Exception] {
                 # Log any failures to sync AD data into the OIM CMS, for reference.
                 Log $("ERROR: failed to update OIM CMS user {0} as having an O365 licence" -f $cmsUser.email);
