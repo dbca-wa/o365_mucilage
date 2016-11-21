@@ -1,4 +1,8 @@
 creds.psm1
-*.log*
+*.log
 *.json
 *.xml
+*.csv
+old/
+oldLogs/
+org_wrangler_result.txt
