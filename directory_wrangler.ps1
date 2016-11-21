@@ -34,10 +34,9 @@ try {
     
     # Read the user list from AD. Apply a rough filter for accounts we want to load into OIM CMS:
     # - email address is *.wa.gov.au or dpaw.onmicrosoft.com
-    # - has both a first name and surname
     # - DN contains a sub-OU called "Users"
     # - DN does not contain a sub-OU with "Administrators" in the name
-    $adusers = Get-ADUser -server $adserver -Filter {EmailAddress -like "*@*wa.gov.au" -and Surname -ne $false} -Properties $adprops | where distinguishedName -Like "*OU=Users*" | where distinguishedName -NotLike "*Administrators*";
+    $adusers = Get-ADUser -server $adserver -Filter {EmailAddress -like "*@*wa.gov.au"} -Properties $adprops | where distinguishedName -Like "*OU=Users*" | where distinguishedName -NotLike "*Administrators*";
     $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@dpaw.onmicrosoft.com"} -Properties $adprops;
     Log $("Processing {0} users" -f $adusers.Length);
 
