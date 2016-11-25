@@ -41,19 +41,29 @@ try {
     Log $("Processing {0} users" -f $adusers.Length);
 
     # If an AD user doesn't exist in the OIM CMS, load the data from current AD record via the REST API.
-    ForEach ($aduser in $adusers | where { $_.EmailAddress -notin $users.objects.email }) {
-        $simpleuser = $aduser | select ObjectGUID, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Modified, Enabled, AccountExpirationDate, pwdLastSet, employeeType;
-        $simpleuser.Modified = Get-Date $aduser.Modified -Format s;
-        if ($aduser.AccountExpirationDate) { 
-            $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
+    ForEach ($aduser in $adusers) {
+        if ($aduser.EmailAddress -notin $users.objects.email) {
+            $simpleuser = $aduser | select ObjectGUID, DistinguishedName, DisplayName, Title, SamAccountName, GivenName, Surname, EmailAddress, Modified, Enabled, AccountExpirationDate, pwdLastSet, employeeType;
+            $simpleuser.Modified = Get-Date $aduser.Modified -Format s;
+            if ($aduser.AccountExpirationDate) {
+                $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
+            }
+            $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
+            # For every push to the API, we need to explicitly convert to UTF8 bytes
+            # to avoid the stupid moon-man encoding Windows uses for strings.
+            # Without this, e.g. users with Unicode names will fail as the server expects UTF8.
+            $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
+            # Here we POST to the API endpoint to create a new DepartmentUser in the CMS.
+            try {
+                Log $("Creating a new OIM CMS object for {0}" -f $aduser.EmailAddress);
+                $response = Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession;
+            } catch [System.Exception] {
+                # Log any failures to sync AD data into the OIM CMS, for reference.
+                Log $("ERROR: creating new OIM CMS suer failed for {0}" -f $aduser.EmailAddress);
+                Log $_.Exception.ToString();
+                Log $($userjson);
+            }
         }
-        $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
-        # For every push to the API, we need to explicitly convert to UTF8 bytes
-        # to avoid the stupid moon-man encoding Windows uses for strings. 
-        # Without this, e.g. users with Unicode names will fail as the server expects UTF8.
-        $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
-        # Here we POST to the API endpoint to create a new DepartmentUser in the CMS.
-        (Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession).ad_data;
     }
 
     # For each OIM CMS DepartmentUser...
