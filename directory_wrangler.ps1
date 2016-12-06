@@ -1,4 +1,4 @@
-﻿Import-Module ActiveDirectory;
+﻿git Import-Module ActiveDirectory;
 Import-Module -Force 'C:\cron\creds.psm1';
 $ErrorActionPreference = "Stop";
 
@@ -41,8 +41,10 @@ try {
     Log $("Processing {0} users" -f $adusers.Length);
 
     # If an AD user doesn't exist in the OIM CMS, load the data from current AD record via the REST API.
+    $cmsusers_updated = $false;
     ForEach ($aduser in $adusers) {
-        if ($aduser.EmailAddress -notin $users.objects.email) {
+        # Match on Active Directory GUID (not email, because that may change) - if absent, create a new user in the CMS.
+        if ($aduser.ObjectGUID -notin $users.objects.ad_guid) {
             $simpleuser = $aduser | select ObjectGUID, DistinguishedName, DisplayName, Title, SamAccountName, GivenName, Surname, EmailAddress, Modified, Enabled, AccountExpirationDate, pwdLastSet, employeeType;
             $simpleuser.Modified = Get-Date $aduser.Modified -Format s;
             if ($aduser.AccountExpirationDate) {
@@ -57,13 +59,45 @@ try {
             try {
                 Log $("Creating a new OIM CMS object for {0}" -f $aduser.EmailAddress);
                 $response = Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession;
+                # Note that a change has occurred.
+                $cmsusers_updated = $true;
             } catch [System.Exception] {
                 # Log any failures to sync AD data into the OIM CMS, for reference.
-                Log $("ERROR: creating new OIM CMS suer failed for {0}" -f $aduser.EmailAddress);
+                Log $("ERROR: creating new OIM CMS user failed for {0}" -f $aduser.EmailAddress);
                 Log $_.Exception.ToString();
                 Log $($userjson);
             }
+        } else {
+            # Find any cases where the AD user's email has been changed, and update the CMS user.
+            $cmsUser = $users.objects | where ad_guid -EQ $aduser.ObjectGUID;
+            if ($cmsUser.email -ne $aduser.EmailAddress) {
+                $simpleuser = $aduser | select ObjectGUID, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
+                $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
+                if ($aduser.AccountExpirationDate) {
+                    $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
+                }
+                # ...convert the whole lot to JSON and push to OIM CMS via the REST API.
+                $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
+                $user_update_api = $user_api + '{0}/' -f $simpleuser.ObjectGUID;
+                try {
+                    # Invoke the API.
+                    Log $("Updating OIM CMS data for {0}" -f $cmsUser.email);
+                    $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
+                    # Note that a change has occurred.
+                    $cmsusers_updated = $true;
+                } catch [System.Exception] {
+                    # Log any failures to sync AD data into the OIM CMS, for reference.
+                    Log $("ERROR: updating OIM CMS failed for {0}" -f $cmsUser.email);
+                    Log $_.Exception.ToString();
+                    Log $($simpleuser | ConvertTo-Json);
+                }
+            }
         }
+    }
+
+    # Get the list of users from the CMS again (if required, following any additions/updates).
+    if ($cmsusers_updated) {
+        $users = Invoke-RestMethod ("{0}?all" -f $user_api) -WebSession $oimsession;
     }
 
     # For each OIM CMS DepartmentUser...
@@ -122,7 +156,7 @@ try {
                 # ...glom the mailbox object onto the AD object
                 $simpleuser = $aduser | select ObjectGUID, @{name="mailbox";expression={$mb}}, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
                 $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
-                if ($aduser.AccountExpirationDate) { 
+                if ($aduser.AccountExpirationDate) {
                     $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
                 }
                 # ...convert the whole lot to JSON and push to OIM CMS via the REST API.
