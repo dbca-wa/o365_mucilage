@@ -8,8 +8,43 @@ Function Log {
 
 # download distribution group list from Exchange Online
 $dgrps = Invoke-command -session $session -Command { Get-DistributionGroup -ResultSize unlimited };
+$ugrps = Invoke-command -session $session -Command { Get-UnifiedGroup -ResultSize unlimited };
 
-Log $("Processing {0} groups" -f $dgrps.Length);
+Log $("Processing {0} unified groups" -f $ugrps.Length);
+
+try {    
+    # fetch all the shadow groups from the local AD
+    $localgroups = Get-ADGroup -Filter * -SearchBase $unified_group_ou;
+
+    # Remove groups missing online
+    if ($ugrps.Length -gt 100) {
+        compare-object -Property Name $localgroups $ugrps | where sideindicator -like '<=' | foreach { Get-ADGroup -Filter "Name -like `"$($_.Name)`"" -SearchBase $unified_group_ou } | Remove-ADGroup -Confirm:$false
+    }
+    
+    # create/update the rest of the shadow groups to match Exchange Online
+    ForEach ($ugrp in $ugrps) {
+        $group = $localgroups | where Name -like $ugrp.Name;
+        if (-not $group) { 
+            $group = New-ADGroup -GroupScope Universal -Path $unified_group_ou -Name $ugrp.Name -DisplayName $ugrp.DisplayName;
+            Continue; # skip trying to populate freshly created group, give it some time to replicate
+        }
+        $lmembers = Get-ADGroupMember $group;
+        if (-not $lmembers) { $lmembers = @() };
+        $members = $ugrp | Invoke-command -session $session -Command { get-unifiedgrouplinks -linktype Members} | foreach { Get-ADUser -Filter "EmailAddress -like `"$($_.PrimarySMTPAddress)`"" }
+        # Update memberships
+        $diff = Compare-Object $lmembers $members;
+        $toadd = $diff | where sideindicator -like '=>' | select -ExpandProperty inputobject;
+        if ($toadd) { Add-ADGroupMember $group -Members $toadd -Confirm:$false; };
+        $todel = $diff | where sideindicator -like '<=' | select -ExpandProperty inputobject;
+        if ($todel) { Remove-ADGroupMember $group -Members $todel -Confirm:$false; };
+    }
+     
+} catch [System.Exception] {
+    Log "ERROR: Exception caught, skipping rest of UnifiedGroup";
+    Log $($_ | convertto-json);
+}
+
+Log $("Processing {0} distribution groups" -f $dgrps.Length);
 
 try {
     # filter the Exchange Online groups list for groups that are "In cloud", and
