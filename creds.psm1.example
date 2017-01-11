@@ -7,6 +7,7 @@ $adserver = "dc-001";
 
 # OU definition used by group_wrangler to create shadow AD copies of groups managed by Exchange Online
 $mail_security_ou = "example.com/Groups/MailSecurity";
+$unified_group_ou = "OU=UnifiedGroup,OU=Groups,DC=example,DC=com";
 
 # OU definitions used by org_wrangler to store a flattened AD replica of the OIM CMS org structure table
 $org_unit_ou = "example.com/Groups/OrgUnit";
