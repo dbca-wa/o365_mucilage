@@ -1,5 +1,4 @@
-﻿git Import-Module ActiveDirectory;
-Import-Module -Force 'C:\cron\creds.psm1';
+﻿Import-Module -Force 'C:\cron\creds.psm1';
 $ErrorActionPreference = "Stop";
 
 Function Log {

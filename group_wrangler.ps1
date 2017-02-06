@@ -31,6 +31,7 @@ try {
         $lmembers = Get-ADGroupMember $group;
         if (-not $lmembers) { $lmembers = @() };
         $members = $ugrp | Invoke-command -session $session -Command { get-unifiedgrouplinks -linktype Members} | foreach { Get-ADUser -Filter "EmailAddress -like `"$($_.PrimarySMTPAddress)`"" }
+        if (-not $members) { $members = @() };
         # Update memberships
         $diff = Compare-Object $lmembers $members;
         $toadd = $diff | where sideindicator -like '=>' | select -ExpandProperty inputobject;
