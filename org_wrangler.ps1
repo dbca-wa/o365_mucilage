@@ -13,10 +13,7 @@ Function smash-groups {
     param([Object[]]$grps, [Object[]]$localgroups, [String]$ou)
     # loop through all the groups taken from the OIM CMS org structure
     foreach ($grp in $grps) {
-        $group, $ogroup, $diff = $null, $null, @();
-
-        # find the equivalent group in AD
-        $group = $localgroups | where Alias -like $grp.id;
+        $ogroup, $diff = $null, $null, @();
 
         # find the equivalent group in Exchange Online
         $ogroup = $dgrps | where Alias -like $grp.id;
@@ -36,13 +33,8 @@ Function smash-groups {
             }
         }
 
-        # create AD group, if it doesn't exist
-        if (-not $group) { 
-            $group = New-DistributionGroup -OrganizationalUnit $ou -Alias $id -PrimarySmtpAddress $email -Name $name -Type Security;
-        }
-
         # bail out if either of those operations return $null
-        if (-not ($group -and $ogroup)) { 
+        if (-not $ogroup) { 
             continue;
         }
 
@@ -55,25 +47,9 @@ Function smash-groups {
             $email = $email.split("@")[0]+"-orgunit@"+$email.split("@")[1];
             Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-DistributionGroup `"$id`" -Name `"$name`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy `"$owner`" -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
         }
-        Set-DistributionGroup $id -Name $name -DisplayName $dname -PrimarySmtpAddress $email -ManagedBy $owner -MailTip $mtip  -BypassSecurityGroupManagerCheck -Confirm:$false;
-        
-        # check for a change in group membership, before doing the expensive update group members operation
-        try { 
-            $diff = compare $((Get-DistributionGroupMember $group -ResultSize Unlimited).primarysmtpaddress | foreach { $([string]$_).toLower() }) $($grp.members | foreach { $_.toLower() }) -PassThru;
-            if ($diff.Length -eq 0) { 
-                continue;
-            } 
-        } catch [System.Exception] { 
-            $diff = $grp.members;
-        }
-        Log $("Updating {3}/{2} in {0} managed by {1}" -f $group, $owner, $($grp.members.length), $($diff.Length));
-        if ($diff.Length -lt 5) { 
-            Log $($diff | convertto-json);
-        }
 
-        # update members of the Outlook Online and AD groups to match OIM CMS
+        # update members of Outlook Online to match OIM CMS
         Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Update-DistributionGroupMember `"$id`" -Members `"$($grp.members -join '","')`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
-        Update-DistributionGroupMember $id -Members $grp.members  -BypassSecurityGroupManagerCheck -Confirm:$false;
     }
 }
 
@@ -93,19 +69,6 @@ try {
     smash-groups -grps $orgunits -localgroups $localgroups -ou $org_unit_ou;
 } catch [System.Exception] {
     Log "ERROR: Exception caught, skipping rest of OrgUnit";
-    Log $($_ | convertto-json);
-    $result = "Failure"
-    $result | Out-File "C:\cron\org_wrangler_result.txt"
-}
-
-# update cost centre groups
-try {
-    $costcentres = $org_structure.objects | where id -like "db-cc_*" | where email -like "*@*";
-    Log $("Loading {0} CostCentre groups..." -f $costcentres.length);
-    $localgroups = Get-DistributionGroup -OrganizationalUnit $cost_centre_ou -ResultSize Unlimited;
-    smash-groups -grps $costcentres -localgroups $localgroups -ou $cost_centre_ou;
-} catch [System.Exception] {
-    Log "ERROR: Exception caught, skipping rest of CostCentre";
     Log $($_ | convertto-json);
     $result = "Failure"
     $result | Out-File "C:\cron\org_wrangler_result.txt"
