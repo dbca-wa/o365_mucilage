@@ -17,7 +17,6 @@ try {
     # Read the full user DB from OIM CMS (all DepartmentUser objects) via the OIM CMS API.
     # NOTE: $user_api is set in C:\cron\creds.psm1
     $users = Invoke-RestMethod ("{0}?all" -f $user_api) -WebSession $oimsession;
-    # Do a workaround to vault PowerShell's dumb 10mb JSON limit.
     if (-not $users.objects) {
         [void][System.Reflection.Assembly]::LoadWithPartialName("System.Web.Extensions");
         $json = New-Object -TypeName System.Web.Script.Serialization.JavaScriptSerializer;
@@ -38,9 +37,11 @@ try {
     $adusers = Get-ADUser -server $adserver -Filter {EmailAddress -like "*@*wa.gov.au"} -Properties $adprops | where distinguishedName -Like "*OU=Users*" | where distinguishedName -NotLike "*Administrators*";
     $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@dpaw.onmicrosoft.com"} -Properties $adprops;
     Log $("Processing {0} users" -f $adusers.Length);
+    $cmsusers_updated = $false;
+
+    #Write-Output "UPDATING OIM CMS FROM AD DATA";
 
     # If an AD user doesn't exist in the OIM CMS, load the data from current AD record via the REST API.
-    $cmsusers_updated = $false;
     ForEach ($aduser in $adusers) {
         # Match on Active Directory GUID (not email, because that may change) - if absent, create a new user in the CMS.
         if ($aduser.ObjectGUID -notin $users.objects.ad_guid) {
@@ -97,8 +98,15 @@ try {
     # Get the list of users from the CMS again (if required, following any additions/updates).
     if ($cmsusers_updated) {
         $users = Invoke-RestMethod ("{0}?all" -f $user_api) -WebSession $oimsession;
+        if (-not $users.objects) {
+            [void][System.Reflection.Assembly]::LoadWithPartialName("System.Web.Extensions");
+            $json = New-Object -TypeName System.Web.Script.Serialization.JavaScriptSerializer;
+            $json.MaxJsonLength = 104857600;
+            $users = $json.Deserialize($users, [System.Object]);
+        }
     }
 
+    #Write-Output "TIME TO UPDATE AD FROM OIM CMS DATA";
     # For each OIM CMS DepartmentUser...
     foreach ($user in $users.objects) {
         # ...find the equivalent Active Directory Object.
@@ -106,6 +114,7 @@ try {
         If ($aduser) {
             # If the OIM CMS user object was modified in the last hour...
             if (($(Get-Date) - (New-TimeSpan -Minutes 60)) -lt $(Get-Date $user.date_updated) -and ($aduser.Modified -lt $(Get-Date $user.date_updated))) {
+                #Write-Output $("Looks like {0} was modified in the last hour, updating" -f $user.email);
                 # ...set all the properties on the AD object to match the OIM CMS object
                 $aduser.Title = $user.title;
                 $aduser.DisplayName, $aduser.GivenName, $aduser.Surname = $user.name, $user.given_name, $user.surname;
@@ -133,6 +142,7 @@ try {
                 }
                 # ...push changes back to AD
                 try {
+                    Log $("Updating AD data with OIM CMS data (newer) for {0}" -f $aduser.EmailAddress);
                     Set-ADUser -verbose -server $adserver -instance $aduser;
                     # (thumbnailPhoto isn't added as a property of $aduser for some dumb reason, so we have to push it seperately)
                     if ($user.photo_ad -and $user.photo_ad.startswith('http')) {
@@ -150,6 +160,7 @@ try {
             }
             # If the AD object was modified after the OIM CMS object, sync back to the CMS...
             if (('Modified' -notin $user.ad_data.Keys) -or ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified))) {
+                #Write-Output $("Looks like {0} was updated in AD after the CMS, updating" -f $user.email);
                 # ...find the mailbox object
                 $mb = $mailboxes | where userprincipalname -like $user.email;
                 # ...glom the mailbox object onto the AD object
@@ -163,7 +174,7 @@ try {
                 $user_update_api = $user_api + '{0}/' -f $simpleuser.ObjectGUID;
                 try {
                     # Invoke the API.
-                    Log $("Updating OIM CMS data for {0}" -f $user.email);
+                    Log $("Updating OIM CMS data for {0} from AD data (newer)" -f $user.email);
                     $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
                 } catch [System.Exception] {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
@@ -174,6 +185,7 @@ try {
             }
         } 
         Else {
+            #Write-Output $("Couldn't find {0}!" -f $user.email);
             # No AD object found - mark the user as "AD deleted" in the CMS (if it's not already).
             If (-Not $user.ad_deleted) {
                 $body = @{EmailAddress=$user.email; Deleted="true"};
@@ -215,6 +227,7 @@ try {
         }
     }
 
+    #Write-Output "TIME TO SYNC TO O365";
     # We've done a whole pile of AD changes, so now's a good time to run AADSync to push them to O365:
     Log "Azure AD Connect Syncing with O365";
     Start-ADSyncSyncCycle -PolicyType Delta;
@@ -284,7 +297,6 @@ try {
             $mb | Set-RemoteMailbox -RemoteRoutingAddress $remote;
         }
     }
-
     Log "Finished";
 } catch [System.Exception] {
     Log "ERROR: Exception caught, dying =(";
