@@ -7,6 +7,8 @@ Function Log {
 }
 
 try {
+    Log "Starting directory_wrangler script";
+
     # Store the domain max password age in days.
     $DefaultmaxPasswordAgeDays = (Get-ADDefaultDomainPasswordPolicy).MaxPasswordAge.Days;
 
@@ -17,6 +19,7 @@ try {
     # Read the full user DB from OIM CMS (all DepartmentUser objects) via the OIM CMS API.
     # NOTE: $user_api is set in C:\cron\creds.psm1
     $users = Invoke-RestMethod ("{0}?all" -f $user_api) -WebSession $oimsession;
+    # Deserialise response into JSON (bypass the MaxJsonLength property of 2 MB).
     if (-not $users.objects) {
         [void][System.Reflection.Assembly]::LoadWithPartialName("System.Web.Extensions");
         $json = New-Object -TypeName System.Web.Script.Serialization.JavaScriptSerializer;
@@ -70,7 +73,7 @@ try {
         } else {
             # Find any cases where the AD user's email has been changed, and update the CMS user.
             $cmsUser = $users.objects | where ad_guid -EQ $aduser.ObjectGUID;
-            if ($cmsUser.email -ne $aduser.EmailAddress) {
+            if (-Not ($cmsUser.email -like $aduser.EmailAddress)) {
                 $simpleuser = $aduser | select ObjectGUID, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
                 $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
                 if ($aduser.AccountExpirationDate) {
@@ -98,6 +101,7 @@ try {
     # Get the list of users from the CMS again (if required, following any additions/updates).
     if ($cmsusers_updated) {
         $users = Invoke-RestMethod ("{0}?all" -f $user_api) -WebSession $oimsession;
+        # Deserialise response into JSON (bypass the MaxJsonLength property of 2 MB).
         if (-not $users.objects) {
             [void][System.Reflection.Assembly]::LoadWithPartialName("System.Web.Extensions");
             $json = New-Object -TypeName System.Web.Script.Serialization.JavaScriptSerializer;
@@ -131,7 +135,7 @@ try {
                 $aduser.telephoneNumber, $aduser.Mobile = $user.telephone, $user.mobile_phone;
                 $aduser.Fax = $user.org_unit__location__fax;
                 $aduser.employeeType = $user.account_type + " " + $user.position_type;
-                if ($user.parent__email -ne ($adusers | where distinguishedname -like $aduser.Manager).emailaddress) {
+                if (-not ($user.parent__email -like ($adusers | where distinguishedname -like $aduser.Manager).emailaddress)) {
                     $aduser.Manager = ($adusers | where emailaddress -like $($user.parent__email)).DistinguishedName;
                 }
                 # ...make all of the undefined properties the string "N/A"
