@@ -1,5 +1,4 @@
-﻿
-# OIM CMS private API endpoint for users
+﻿# OIM CMS private API endpoint for users
 $user_api = "https://oim_cms.example.com/api/users";
 
 # hostname of nearest Active Directory DC
@@ -13,6 +12,9 @@ $unified_group_ou = "OU=UnifiedGroup,OU=Groups,DC=example,DC=com";
 $org_unit_ou = "example.com/Groups/OrgUnit";
 $cost_centre_ou = "example.com/Groups/CostCentre";
 $location_ou = "example.com/Groups/Location";
+
+# OU definitions used by directory_wrangler to sync AD user objects with OIM CMS DepartmentUsers
+$user_ous = ("OU=Users,OU=GroupA,DC=example,DC=com", "OU=Users,OU=GroupB,DC=example,DC=com");
 
 # PrimarySMTPAddress of Exchange Online group containing admin users
 $admin_msolgroup = "oim-support-admins@example.com";

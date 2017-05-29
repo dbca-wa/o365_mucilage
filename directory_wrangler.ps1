@@ -37,7 +37,10 @@ try {
     # - email address is *.wa.gov.au or dpaw.onmicrosoft.com
     # - DN contains a sub-OU called "Users"
     # - DN does not contain a sub-OU with "Administrators" in the name
-    $adusers = Get-ADUser -server $adserver -Filter {EmailAddress -like "*@*wa.gov.au"} -Properties $adprops | where distinguishedName -Like "*OU=Users*" | where distinguishedName -NotLike "*Administrators*";
+    $adusers = @();
+    ForEach ($ou in $user_ous) {
+        $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@*wa.gov.au"} -Properties $adprops -SearchBase $ou;
+    }
     $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@dpaw.onmicrosoft.com"} -Properties $adprops;
     Log $("Processing {0} users" -f $adusers.Length);
     $cmsusers_updated = $false;
