@@ -114,8 +114,13 @@ try {
     }
 
     #Write-Output "TIME TO UPDATE AD FROM OIM CMS DATA";
+    # filter OIM CMS DepartmentUsers by whitelisted OrgUnit
+    # this is to allow multiple directory writeback
+
+    $department_users = $users.objects | Where {$_.org_data.units.id | Where {$org_whitelist -contains $_} };
+
     # For each OIM CMS DepartmentUser...
-    foreach ($user in $users.objects) {
+    foreach ($user in $department_users) {
         # ...find the equivalent Active Directory Object.
         $aduser = $adusers | where EmailAddress -like $($user.email);
         If ($aduser) {
@@ -276,7 +281,7 @@ try {
             $username = $msoluser.UserPrincipalName.Split("@", 2)[0]
         }
         $username = $username.Substring(0,[System.Math]::Min(15, $username.Length));
-        # ...link existing users
+        # ...link existing users 
         $upn = $msoluser.UserPrincipalName;
         $existing = Get-ADUser -Filter { UserPrincipalName -like $upn };
         if ($existing) {
