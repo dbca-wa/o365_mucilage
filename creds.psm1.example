@@ -16,6 +16,9 @@ $location_ou = "example.com/Groups/Location";
 # OU definitions used by directory_wrangler to sync AD user objects with OIM CMS DepartmentUsers
 $user_ous = ("OU=Users,OU=GroupA,DC=example,DC=com", "OU=Users,OU=GroupB,DC=example,DC=com");
 
+# Default OU to put new users into
+$new_user_ou = "OU=Users,OU=GroupA,DC=example,DC=com";
+
 # Org units in OIM CMS to whitelist for AD writeback
 $org_whitelist = @(
     1, # organization.OrgUnit with id=1

@@ -274,8 +274,8 @@ try {
         Set-RemoteMailbox $_.userprincipalname -PrimarySmtpAddress $_.userprincipalname -EmailAddressPolicyEnabled $false -Verbose;
     }
     
-    # For each "In cloud" user in Azure AD which is licensed...
-    ForEach ($msoluser in $msolusers | where lastdirsynctime -eq $null | where licenses) {
+    # For each "In cloud" user in Azure AD which is licensed -and- is part of the OIM CMS org whitelist...
+    ForEach ($msoluser in $msolusers | where lastdirsynctime -eq $null | where licenses | where UserPrincipalName -in $department_users.email) {
         $username = $msoluser.FirstName + $msoluser.LastName;
         if (!$username) {
             $username = $msoluser.UserPrincipalName.Split("@", 2)[0]
@@ -290,8 +290,8 @@ try {
             continue;
         }
         # ...create new user
-        Log $("About to create O365 user: New-ADUser $username -Verbose -Path `"OU=Users,OU=DPaW,dc=corporateict,dc=domain`" -Enabled $true -UserPrincipalName $($msoluser.UserPrincipalName) -EmailAddress $($msoluser.UserPrincipalName) -DisplayName $($msoluser.DisplayName) -GivenName $($msoluser.FirstName) -Surname $($msoluser.LastName) -PasswordNotRequired $true");
-        New-ADUser $username -Verbose -Path "OU=Users,OU=DPaW,dc=corporateict,dc=domain" -Enabled $true -UserPrincipalName $msoluser.UserPrincipalName -EmailAddress $msoluser.UserPrincipalName -DisplayName $msoluser.DisplayName -GivenName $msoluser.FirstName -Surname $msoluser.LastName -PasswordNotRequired $true;
+        Log $("About to create O365 user: New-ADUser $username -Verbose -Path `"$new_user_ou`" -Enabled $true -UserPrincipalName $($msoluser.UserPrincipalName) -EmailAddress $($msoluser.UserPrincipalName) -DisplayName $($msoluser.DisplayName) -GivenName $($msoluser.FirstName) -Surname $($msoluser.LastName) -PasswordNotRequired $true");
+        New-ADUser $username -Verbose -Path $new_user_ou -Enabled $true -UserPrincipalName $msoluser.UserPrincipalName -EmailAddress $msoluser.UserPrincipalName -DisplayName $msoluser.DisplayName -GivenName $msoluser.FirstName -Surname $msoluser.LastName -PasswordNotRequired $true;
         # ...wait for changes to propagate
         sleep 10;
         # ...assume RemoteRoutingAddress name is the same base as the UPN
