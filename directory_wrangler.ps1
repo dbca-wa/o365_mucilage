@@ -275,7 +275,7 @@ try {
     }
     
     # For each "In cloud" user in Azure AD which is licensed -and- is part of the OIM CMS org whitelist...
-    ForEach ($msoluser in $msolusers | where lastdirsynctime -eq $null | where licenses | where UserPrincipalName -in $department_users.email) {
+    ForEach ($msoluser in $msolusers | where lastdirsynctime -eq $null | where licenses) { # | where UserPrincipalName -in $department_users.email) {
         $username = $msoluser.FirstName + $msoluser.LastName;
         if (!$username) {
             $username = $msoluser.UserPrincipalName.Split("@", 2)[0]
