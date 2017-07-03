@@ -9,8 +9,11 @@ Function Log {
 # download distribution group list from Exchange Online
 $dgrps = Invoke-command -session $session -Command { Get-DistributionGroup -ResultSize unlimited };
 
+# download user list from Office 365
+$users = Get-MsolUser -All;
+
 Function smash-groups {
-    param([Object[]]$grps, [Object[]]$localgroups, [String]$ou)
+    param([Object[]]$grps)
     # loop through all the groups taken from the OIM CMS org structure
     foreach ($grp in $grps) {
         $ogroup, $diff = $null, $null, @();
@@ -22,6 +25,13 @@ Function smash-groups {
         $name = $grp.name.Substring(0,[System.Math]::Min(64, $grp.name.Length)).replace("`r", "").replace("`n", " ").TrimEnd();
         $id, $email, $dname, $owner = $grp.id, $grp.email, $grp.name, $grp.owner;
         
+        # check if the owner is in the O365 directory
+        # FIXME: support@dpaw.wa.gov.au isn't a UPN? which then breaks this
+        #If ($owner -notin $users.UserPrincipalName) {
+        #    Log $("Skipping {0}, couldn't find ManagedBy in O365:  {1}" -f $email,$owner);
+        #    continue;
+        #}
+
         # create Outlook Online group, if it doesn't exist
         if (-not $ogroup) { 
             try {
@@ -45,11 +55,20 @@ Function smash-groups {
         } catch [System.Exception] {
             # bump email and try again
             $email = $email.split("@")[0]+"-orgunit@"+$email.split("@")[1];
+            Log "Set-DistributionGroup `"$id`" -Name `"$name`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy `"$owner`" -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false";
             Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-DistributionGroup `"$id`" -Name `"$name`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy `"$owner`" -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
         }
 
+        
+        $missing = $grp.members | Where {$_ -notin $users.UserPrincipalName};
+        If ($missing) {
+             Log $("Couldn't find following DepartmentUsers in O365 for group {0}:  {1}" -f $email,$($missing -join ', '));
+        }
+        #Log $("Writing DepartmentUsers in O365 for group {0}:  {1}" -f $email,$($members -join ', '));
+        $members = $grp.members | Where {$_ -in $users.UserPrincipalName};
+
         # update members of Outlook Online to match OIM CMS
-        Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Update-DistributionGroupMember `"$id`" -Members `"$($grp.members -join '","')`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
+        Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Update-DistributionGroupMember `"$id`" -Members `"$($members -join '","')`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
     }
 }
 
@@ -65,8 +84,7 @@ $org_structure = Invoke-RestMethod ("{0}?org_structure=true&sync_o365=true&popul
 try {
     $orgunits = $org_structure.objects | where id -like "db-org_*" | where email -like "*@*";
     Log $("Loading {0} OrgUnit groups..." -f $orgunits.length);
-    $localgroups = Get-DistributionGroup -OrganizationalUnit $org_unit_ou -ResultSize Unlimited;
-    smash-groups -grps $orgunits -localgroups $localgroups -ou $org_unit_ou;
+    smash-groups -grps $orgunits;
 } catch [System.Exception] {
     Log "ERROR: Exception caught, skipping rest of OrgUnit";
     Log $($_ | convertto-json);
@@ -78,8 +96,7 @@ try {
 try {
     $locations = $org_structure.objects | where id -like "db-loc*_*" | where email -like "*@*";
     Log $("Loading {0} Location groups" -f $locations.length);
-    $localgroups = Get-DistributionGroup -OrganizationalUnit $location_ou -ResultSize Unlimited;
-    smash-groups -grps $locations -localgroups $localgroups -ou $location_ou;
+    smash-groups -grps $locations;
 } catch [System.Exception] {
     Log "ERROR: Exception caught, skipping rest of Location";
     Log $($_ | convertto-json);
