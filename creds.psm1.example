@@ -19,6 +19,9 @@ $user_ous = ("OU=Users,OU=GroupA,DC=example,DC=com", "OU=Users,OU=GroupB,DC=exam
 # Default OU to put new users into
 $new_user_ou = "OU=Users,OU=GroupA,DC=example,DC=com";
 
+# directory wrangler steps 
+$dw_aadsync = $true;
+
 # Org units in OIM CMS to whitelist for AD writeback
 $org_whitelist = @(
     1, # organization.OrgUnit with id=1

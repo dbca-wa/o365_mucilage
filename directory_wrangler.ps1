@@ -262,14 +262,15 @@ try {
     ##### AZURE AD SYNC
     ####################
 
-    #Write-Output "TIME TO SYNC TO O365";
-    # We've done a whole pile of AD changes, so now's a good time to run AADSync to push them to O365:
-    Log "Azure AD Connect Syncing with O365";
-    Start-ADSyncSyncCycle -PolicyType Delta;
-    # This command is not blocking and the new AAD Connect API is crap at polling for activity,
-    # so let's just block for 60 seconds!
-    Start-Sleep -s 60;
-
+    if ($dw_aadsync) {
+        #Write-Output "TIME TO SYNC TO O365";
+        # We've done a whole pile of AD changes, so now's a good time to run AADSync to push them to O365:
+        Log "Azure AD Connect Syncing with O365";
+        Start-ADSyncSyncCycle -PolicyType Delta;
+        # This command is not blocking and the new AAD Connect API is crap at polling for activity,
+        # so let's just block for 60 seconds!
+        Start-Sleep -s 60;
+    }
 
     ############################
     ##### NEW USER AD WRITEBACK
