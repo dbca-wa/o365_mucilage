@@ -142,6 +142,28 @@ try {
     # For each OIM CMS DepartmentUser...
     foreach ($user in $department_users) {
         # ...find the equivalent Active Directory Object.
+        If (-Not $user.ad_guid) {
+            $aduser = $adusers | where EmailAddress -eq $user.email;
+            If ($aduser) {
+                Log $('Found a match for {0}, addding GUID {1}' -f $user.email,$aduser.ObjectGUID);
+                $simpleuser = $aduser | select ObjectGUID, DistinguishedName;
+                $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
+                $user_update_api = $user_api + '{0}/' -f $user.email;
+                try {
+                    # Invoke the API.
+                    $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
+                    # Note that a change has occurred.
+                    $cmsusers_updated = $true;
+                } catch [System.Exception] {
+                    # Log any failures to sync AD data into the OIM CMS, for reference.
+                    Log $("ERROR: updating OIM CMS failed for {0}" -f $user.email);
+                    Log $_.Exception.ToString();
+                    Log $($simpleuser | ConvertTo-Json);
+                }
+            }
+            continue;
+        }
+
         $aduser = $adusers | where ObjectGUID -eq $($user.ad_guid);
         
         If ($aduser) {
