@@ -28,6 +28,10 @@ try {
         $json.MaxJsonLength = 104857600;
         $users = $json.Deserialize($users, [System.Object]);
     }
+    $user_guid = @{};
+    ForEach($user in $users.objects | where {$_.ad_guid}) {
+        $user_guid[$user.ad_guid] = $user;
+    }
     
     # Define user object attributes that we care about.
     $keynames = @("Title", "DisplayName", "GivenName", "Surname", "Company", "physicalDeliveryOfficeName", "StreetAddress", 
@@ -54,7 +58,6 @@ try {
     ###################################
 
     #Write-Output "UPDATING OIM CMS FROM AD DATA";
-
     
     ForEach ($aduser in $adusers) {
 
@@ -85,9 +88,9 @@ try {
         #        Log $($userjson);
         #    }
         #} else {
-        if ($aduser.ObjectGUID -in $users.objects.ad_guid) {
+        $cmsUser = $user_guid[$aduser.ObjectGUID];
+        if ($cmsUser) {
             # Find any cases where the AD user's email has been changed, and update the CMS user.
-            $cmsUser = $users.objects | where ad_guid -EQ $aduser.ObjectGUID;
             if (-Not ($cmsUser.email -like $aduser.EmailAddress)) {
                 $simpleuser = $aduser | select ObjectGUID, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
                 $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
@@ -139,13 +142,15 @@ try {
     # For each OIM CMS DepartmentUser...
     foreach ($user in $department_users) {
         # ...find the equivalent Active Directory Object.
-        $aduser = $adusers | where EmailAddress -like $($user.email);
+        $aduser = $adusers | where ObjectGUID -eq $($user.ad_guid);
         
         If ($aduser) {
             # If the OIM CMS user object was modified in the last hour...
             if (($(Get-Date) - (New-TimeSpan -Minutes 60)) -lt $(Get-Date $user.date_updated) -and ($aduser.Modified -lt $(Get-Date $user.date_updated))) {
                 Write-Output $("Looks like {0} was modified in the last hour, updating" -f $user.email);
                 # ...set all the properties on the AD object to match the OIM CMS object
+                
+
                 $aduser.Title = $user.title;
                 $aduser.DisplayName, $aduser.GivenName, $aduser.Surname = $user.name, $user.given_name, $user.surname;
                 $aduser.Company = $user.org_data.cost_centre.code;
@@ -182,6 +187,13 @@ try {
                     else {
                         Set-ADUser -verbose -server $adserver $aduser -clear thumbnailPhoto;
                     }
+                    
+                    # if there's an email address change, use outlook
+                    If ($user.email -and ($aduser.emailaddress -ne $user.email)) {
+                        Log $("Updating email address for {0} to {1}" -f $aduser.EmailAddress,$user.email);
+                        Set-RemoteMailbox -Identity $aduser.emailaddress -PrimarySmtpAddress $user.email -EmailAddressPolicyEnabled $false;
+                    }
+
                 } catch [System.Exception] {
                     Log $("ERROR: set-aduser failed on {0}" -f $user.email);
                     Log $($aduser | select $($aduser.ModifiedProperties) | convertto-json);
@@ -190,7 +202,8 @@ try {
                 }
             }
             # If the AD object was modified after the OIM CMS object, sync back to the CMS...
-            if (('Modified' -notin $user.ad_data.Keys) -or ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified))) {
+            if ($false) {
+            #if (('Modified' -notin $user.ad_data.Keys) -or ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified))) {
                 #Write-Output $("Looks like {0} was updated in AD after the CMS, updating" -f $user.email);
                 # ...find the mailbox object
                 $mb = $mailboxes | where userprincipalname -like $user.email;
@@ -214,8 +227,7 @@ try {
                     Log $($simpleuser | ConvertTo-Json);
                 }
             }
-        } 
-        Else {
+        } Else {
             #Write-Output $("Couldn't find {0}!" -f $user.email);
             # No AD object found - mark the user as "AD deleted" in the CMS (if it's not already).
             If (-Not $user.ad_deleted) {
@@ -263,6 +275,7 @@ try {
     ####################
 
     if ($dw_aadsync) {
+        Import-Module ADSync;
         #Write-Output "TIME TO SYNC TO O365";
         # We've done a whole pile of AD changes, so now's a good time to run AADSync to push them to O365:
         Log "Azure AD Connect Syncing with O365";
@@ -313,10 +326,15 @@ try {
     ##### CLEANUP
     ##############
 
+    $adusers = @();
+    ForEach ($ou in $user_ous) {
+        $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@*wa.gov.au"} -Properties $adprops -SearchBase $ou;
+    }
+    $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@dpaw.onmicrosoft.com"} -Properties $adprops;
 
     # Rig the UPN for each user account so that it matches the primary SMTP address.
     foreach ($aduser in $adusers | where {$_.emailaddress -and ($_.emailaddress -ne $_.userprincipalname)}) {
-        Log $("Changing UPN from {0} to {1}" -f $aduser.emailaddress,$aduser.UserPrincipalName);
+        Log $("Changing UPN from {0} to {1}" -f $aduser.UserPrincipalName,$aduser.emailaddress);
         Set-ADUser $aduser -UserPrincipalName $aduser.emailaddress -Verbose;
     }
 
