@@ -3,7 +3,9 @@ $ErrorActionPreference = "Stop";
 
 Function Log {
    Param ([string]$logstring)
-   Add-content "C:\cron\directory_wrangler.log" -value $("{0} ({1} - {2}): {3}" -f $(Get-Date), $(GCI $MyInvocation.PSCommandPath | Select -Expand Name), $pid, $logstring);
+   $output = $("{0} ({1} - {2}): {3}" -f $(Get-Date), $(GCI $MyInvocation.PSCommandPath | Select -Expand Name), $pid, $logstring);
+   Write-Host $output;
+   Add-content "C:\cron\directory_wrangler.log" -value $output;
 }
 
 try {
@@ -45,35 +47,45 @@ try {
     Log $("Processing {0} users" -f $adusers.Length);
     $cmsusers_updated = $false;
 
+
+
+    ###################################
+    ##### PUSH AD EMAIL CHANGES TO CMS
+    ###################################
+
     #Write-Output "UPDATING OIM CMS FROM AD DATA";
 
-    # If an AD user doesn't exist in the OIM CMS, load the data from current AD record via the REST API.
+    
     ForEach ($aduser in $adusers) {
+
+        # DEPRECATED: we no longer create new CMS DepartmentUser objects here, that happens in cloud_wrangler
+        # If an AD user doesn't exist in the OIM CMS, load the data from current AD record via the REST API.
         # Match on Active Directory GUID (not email, because that may change) - if absent, create a new user in the CMS.
-        if ($aduser.ObjectGUID -notin $users.objects.ad_guid) {
-            $simpleuser = $aduser | select ObjectGUID, DistinguishedName, DisplayName, Title, SamAccountName, GivenName, Surname, EmailAddress, Modified, Enabled, AccountExpirationDate, pwdLastSet, employeeType;
-            $simpleuser.Modified = Get-Date $aduser.Modified -Format s;
-            if ($aduser.AccountExpirationDate) {
-                $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
-            }
-            $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
-            # For every push to the API, we need to explicitly convert to UTF8 bytes
-            # to avoid the stupid moon-man encoding Windows uses for strings.
-            # Without this, e.g. users with Unicode names will fail as the server expects UTF8.
-            $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
-            # Here we POST to the API endpoint to create a new DepartmentUser in the CMS.
-            try {
-                Log $("Creating a new OIM CMS object for {0}" -f $aduser.EmailAddress);
-                $response = Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession;
-                # Note that a change has occurred.
-                $cmsusers_updated = $true;
-            } catch [System.Exception] {
-                # Log any failures to sync AD data into the OIM CMS, for reference.
-                Log $("ERROR: creating new OIM CMS user failed for {0}" -f $aduser.EmailAddress);
-                Log $_.Exception.ToString();
-                Log $($userjson);
-            }
-        } else {
+        #if ($aduser.ObjectGUID -notin $users.objects.ad_guid) {
+        #    $simpleuser = $aduser | select ObjectGUID, DistinguishedName, DisplayName, Title, SamAccountName, GivenName, Surname, EmailAddress, Modified, Enabled, AccountExpirationDate, pwdLastSet, employeeType;
+        #    $simpleuser.Modified = Get-Date $aduser.Modified -Format s;
+        #    if ($aduser.AccountExpirationDate) {
+        #        $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
+        #    }
+        #    $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
+        #    # For every push to the API, we need to explicitly convert to UTF8 bytes
+        #    # to avoid the stupid moon-man encoding Windows uses for strings.
+        #    # Without this, e.g. users with Unicode names will fail as the server expects UTF8.
+        #    $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
+        #    # Here we POST to the API endpoint to create a new DepartmentUser in the CMS.
+        #    try {
+        #        Log $("Creating a new OIM CMS object for {0}" -f $aduser.EmailAddress);
+        #        $response = Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession;
+        #        # Note that a change has occurred.
+        #        $cmsusers_updated = $true;
+        #    } catch [System.Exception] {
+        #        # Log any failures to sync AD data into the OIM CMS, for reference.
+        #        Log $("ERROR: creating new OIM CMS user failed for {0}" -f $aduser.EmailAddress);
+        #        Log $_.Exception.ToString();
+        #        Log $($userjson);
+        #    }
+        #} else {
+        if ($aduser.ObjectGUID -in $users.objects.ad_guid) {
             # Find any cases where the AD user's email has been changed, and update the CMS user.
             $cmsUser = $users.objects | where ad_guid -EQ $aduser.ObjectGUID;
             if (-Not ($cmsUser.email -like $aduser.EmailAddress)) {
@@ -101,6 +113,11 @@ try {
         }
     }
 
+
+    ###########################
+    ##### OIM CMS 2-WAY UPDATE
+    ###########################
+
     # Get the list of users from the CMS again (if required, following any additions/updates).
     if ($cmsusers_updated) {
         $users = Invoke-RestMethod ("{0}?all" -f $user_api) -WebSession $oimsession;
@@ -113,7 +130,7 @@ try {
         }
     }
 
-    #Write-Output "TIME TO UPDATE AD FROM OIM CMS DATA";
+    Write-Output "TIME TO UPDATE AD FROM OIM CMS DATA";
     # filter OIM CMS DepartmentUsers by whitelisted OrgUnit
     # this is to allow multiple directory writeback
 
@@ -123,20 +140,22 @@ try {
     foreach ($user in $department_users) {
         # ...find the equivalent Active Directory Object.
         $aduser = $adusers | where EmailAddress -like $($user.email);
+        
         If ($aduser) {
             # If the OIM CMS user object was modified in the last hour...
             if (($(Get-Date) - (New-TimeSpan -Minutes 60)) -lt $(Get-Date $user.date_updated) -and ($aduser.Modified -lt $(Get-Date $user.date_updated))) {
-                #Write-Output $("Looks like {0} was modified in the last hour, updating" -f $user.email);
+                Write-Output $("Looks like {0} was modified in the last hour, updating" -f $user.email);
                 # ...set all the properties on the AD object to match the OIM CMS object
                 $aduser.Title = $user.title;
                 $aduser.DisplayName, $aduser.GivenName, $aduser.Surname = $user.name, $user.given_name, $user.surname;
                 $aduser.Company = $user.org_data.cost_centre.code;
                 $aduser.physicalDeliveryOfficeName = $user.org_unit__location__name;
                 $aduser.StreetAddress = $user.org_unit__location__address;
-                if ($user.org_data.units) {
-                    $aduser.Division = $user.org_data.units[1].name;
-                    $aduser.Department = $user.org_data.units[0].name; 
-                }
+                #if ($user.org_data.units) {
+                #    $aduser.Division = $user.org_data.units[1].name;
+                #    $aduser.Department = $user.org_data.units[0].name;
+                #}
+                $aduser.Department = $user.gal_department;
                 $aduser.Country, $aduser.State = "AU", "Western Australia";
                 $aduser.wWWHomePage = "https://oim.dpaw.wa.gov.au/address-book/user-details?email=" + $user.email;
                 $aduser.EmployeeNumber, $aduser.EmployeeID = $user.employee_id, $user.employee_id;
@@ -239,6 +258,10 @@ try {
         }
     }
 
+    ####################
+    ##### AZURE AD SYNC
+    ####################
+
     #Write-Output "TIME TO SYNC TO O365";
     # We've done a whole pile of AD changes, so now's a good time to run AADSync to push them to O365:
     Log "Azure AD Connect Syncing with O365";
@@ -247,38 +270,21 @@ try {
     # so let's just block for 60 seconds!
     Start-Sleep -s 60;
 
+
+    ############################
+    ##### NEW USER AD WRITEBACK
+    ############################
+
     # Finally, we want to do some operations on Office 365 accounts not handled by AADSync.
     # Start by reading the full user list.
     $msolusers = get-msoluser -all | select userprincipalname, lastdirsynctime, @{name="licenses";expression={[string]$_.licenses.accountskuid}}, signinname, immutableid, whencreated, displayname, firstname, lastname;
     $msolusers | convertto-json > 'C:\cron\msolusers.json';
-
-    # Rig the UPN for each user account so that it matches the primary SMTP address.
-    foreach ($aduser in $adusers | where {$_.emailaddress -ne $_.userprincipalname}) {
-        $immutableid = [System.Convert]::ToBase64String($aduser.ObjectGuid.toByteArray());
-        $msoluser = $msolusers | where immutableid -eq $immutableid;
-        If ($msoluser) {
-            Set-MsolUserPrincipalName -UserPrincipalName $msoluser.UserPrincipalName -NewUserPrincipalName $aduser.emailaddress -Verbose;
-            Set-ADUser $aduser -UserPrincipalName $aduser.emailaddress -Verbose;
-        } Else {
-            Log $("Warning: MSOL object not found for {0}" -f $aduser.UserPrincipalName);
-        }
-    }
-
-    # For each Exchange Online mailbox that doesn't have it, add an archive mailbox:
-    $mailboxes | where recipienttypedetails -like remoteusermailbox | where { $_.archivestatus -eq "None" } | foreach { 
-        Enable-RemoteMailbox -Identity $_.userprincipalname -Archive;
-    }
-
-    # For each Exchange Online mailbox where it doesn't match, set the PrimarySmtpAddress to match the UserPrincipalName:
-    $mailboxes | where recipienttypedetails -like remoteusermailbox | where { $_.userprincipalname -ne $_.primarysmtpaddress } | foreach { 
-        Set-RemoteMailbox $_.userprincipalname -PrimarySmtpAddress $_.userprincipalname -EmailAddressPolicyEnabled $false -Verbose;
-    }
-    
-    # For each "In cloud" user in Azure AD which is licensed -and- is part of the OIM CMS org whitelist...
-    ForEach ($msoluser in $msolusers | where lastdirsynctime -eq $null | where licenses) { # | where UserPrincipalName -in $department_users.email) {
+        
+    # For each "In cloud" user in Azure AD which is not directory synced and is part of the OIM CMS org whitelist...
+    ForEach ($msoluser in $msolusers | where lastdirsynctime -eq $null | where UserPrincipalName -in $department_users.email) {
         $username = $msoluser.FirstName + $msoluser.LastName;
         if (!$username) {
-            $username = $msoluser.UserPrincipalName.Split("@", 2)[0]
+            $username = $msoluser.UserPrincipalName.Split("@", 2)[0].replace('.','').replace('#', '').replace(',', '')
         }
         $username = $username.Substring(0,[System.Math]::Min(15, $username.Length));
         # ...link existing users 
@@ -301,6 +307,28 @@ try {
         # ...add remotemailbox object
         Enable-RemoteMailbox -Identity $msoluser.UserPrincipalName -PrimarySmtpAddress $msoluser.UserPrincipalName -RemoteRoutingAddress $rra;
     }
+
+    ##############
+    ##### CLEANUP
+    ##############
+
+
+    # Rig the UPN for each user account so that it matches the primary SMTP address.
+    foreach ($aduser in $adusers | where {$_.emailaddress -and ($_.emailaddress -ne $_.userprincipalname)}) {
+        Log $("Changing UPN from {0} to {1}" -f $aduser.emailaddress,$aduser.UserPrincipalName);
+        Set-ADUser $aduser -UserPrincipalName $aduser.emailaddress -Verbose;
+    }
+
+    # For each AD-managed Exchange Online mailbox that doesn't have it, add an archive mailbox:
+    $mailboxes | where recipienttypedetails -like remoteusermailbox | where { $_.archivestatus -eq "None" } | foreach { 
+        Enable-RemoteMailbox -Identity $_.userprincipalname -Archive;
+    }
+
+    # For each Exchange Online mailbox where it doesn't match, set the PrimarySmtpAddress to match the UserPrincipalName.
+    # We shouldn't have to do this anymore, as 365 has welded UPN to PrimarySmtpAddress.
+    #$mailboxes | where recipienttypedetails -like remoteusermailbox | where { $_.userprincipalname -ne $_.primarysmtpaddress } | foreach { 
+    #    Set-RemoteMailbox $_.userprincipalname -PrimarySmtpAddress $_.userprincipalname -EmailAddressPolicyEnabled $false -Verbose;
+    #}
 
     # Quick loop to fix RemteRoutingAddress; previously some RemoteMailbox objects were provisioned manually with the wrong one.
     ForEach ($mb in Get-RemoteMailbox -ResultSize Unlimited | Where {-not ($_.RemoteRoutingAddress -like "*@dpaw.mail.onmicrosoft.com" )}) {
