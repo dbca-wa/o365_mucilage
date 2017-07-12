@@ -379,14 +379,6 @@ try {
         Enable-RemoteMailbox -Identity $_.userprincipalname -Archive;
     }
 
-    # set auditing for all mailboxes which don't have it
-    $non_audit = $mailboxes | where {-not $_.AuditEnabled};
-    ForEach ($mb in $non_audit) {
-        $email = $mb.PrimarySmtpAddress;
-        Log $("Adding access audit rules for {0}" -f $email);
-        Set-RemoteMailbox -Identity $mb.userprincipalname -AuditEnabled $true -AuditAdmin 'SendAs' -AuditDelegate 'SendAs' -AuditOwner 'MailboxLogin';
-    }
-
     # For each Exchange Online mailbox where it doesn't match, set the PrimarySmtpAddress to match the UserPrincipalName.
     # We shouldn't have to do this anymore, as 365 has welded UPN to PrimarySmtpAddress.
     #$mailboxes | where recipienttypedetails -like remoteusermailbox | where { $_.userprincipalname -ne $_.primarysmtpaddress } | foreach { 
