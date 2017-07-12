@@ -46,6 +46,7 @@ try {
     $adusers = @();
     ForEach ($ou in $user_ous) {
         $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@*wa.gov.au"} -Properties $adprops -SearchBase $ou;
+        $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@rottnestisland.com"} -Properties $adprops -SearchBase $ou;
     }
     $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@dpaw.onmicrosoft.com"} -Properties $adprops;
     Log $("Processing {0} users" -f $adusers.Length);
@@ -145,7 +146,7 @@ try {
         If (-Not $user.ad_guid) {
             $aduser = $adusers | where EmailAddress -eq $user.email;
             If ($aduser) {
-                Log $('Found a match for {0}, addding GUID {1}' -f $user.email,$aduser.ObjectGUID);
+                Log $('Found a match for {0}, adding GUID {1}' -f $user.email,$aduser.ObjectGUID);
                 $simpleuser = $aduser | select ObjectGUID, DistinguishedName;
                 $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
                 $user_update_api = $user_api + '{0}/' -f $user.email;
@@ -169,9 +170,8 @@ try {
         If ($aduser) {
             # If the OIM CMS user object was modified in the last hour...
             if (($(Get-Date) - (New-TimeSpan -Minutes 60)) -lt $(Get-Date $user.date_updated) -and ($aduser.Modified -lt $(Get-Date $user.date_updated))) {
-                Write-Output $("Looks like {0} was modified in the last hour, updating" -f $user.email);
+                #Write-Output $("Looks like {0} was modified in the last hour, updating" -f $user.email);
                 # ...set all the properties on the AD object to match the OIM CMS object
-                
 
                 $aduser.Title = $user.title;
                 $aduser.DisplayName, $aduser.GivenName, $aduser.Surname = $user.name, $user.given_name, $user.surname;
@@ -189,6 +189,10 @@ try {
                 $aduser.telephoneNumber, $aduser.Mobile = $user.telephone, $user.mobile_phone;
                 $aduser.Fax = $user.org_unit__location__fax;
                 $aduser.employeeType = $user.account_type + " " + $user.position_type;
+                # If the user has an account expiry date set that in AD.
+                if ($user.expiry_date) {
+                    $aduser.AccountExpirationDate = $(Get-Date $user.expiry_date);
+                }
                 if (-not ($user.parent__email -like ($adusers | where distinguishedname -like $aduser.Manager).emailaddress)) {
                     $aduser.Manager = ($adusers | where emailaddress -like $($user.parent__email)).DistinguishedName;
                 }
@@ -224,8 +228,7 @@ try {
                 }
             }
             # If the AD object was modified after the OIM CMS object, sync back to the CMS...
-            if ($false) {
-            #if (('Modified' -notin $user.ad_data.Keys) -or ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified))) {
+            if (('Modified' -notin $user.ad_data.Keys) -or ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified))) {
                 #Write-Output $("Looks like {0} was updated in AD after the CMS, updating" -f $user.email);
                 # ...find the mailbox object
                 $mb = $mailboxes | where userprincipalname -like $user.email;
@@ -251,6 +254,7 @@ try {
             }
         } Else {
             #Write-Output $("Couldn't find {0}!" -f $user.email);
+            #Log $("Couldn't find {0} in AD!" -f $user.email);
             # No AD object found - mark the user as "AD deleted" in the CMS (if it's not already).
             If (-Not $user.ad_deleted) {
                 $body = @{EmailAddress=$user.email; Deleted="true"};
@@ -268,6 +272,7 @@ try {
                 }
             }
         }
+
         # If the user is disabled in AD but still marked active in the OIM CMS, update the user in the CMS.
         if ($aduser.enabled -eq $false) {
             if ($user.active) {
@@ -360,9 +365,26 @@ try {
         Set-ADUser $aduser -UserPrincipalName $aduser.emailaddress -Verbose;
     }
 
+    # Iterate over CMS DepartmentUsers and call Disable-ADAccount for any that have expired.
+    foreach ($aduser in $adusers) {
+        if (($aduser.Enabled -eq $true) -and ($aduser.AccountExpirationDate) -and ($aduser.AccountExpirationDate -lt $(Get-Date))) {
+            Log $("Disabling AD account {0}" -f $aduser.EmailAddress);
+            Disable-ADAccount $aduser;
+        }
+    }
+
     # For each AD-managed Exchange Online mailbox that doesn't have it, add an archive mailbox:
-    $mailboxes | where recipienttypedetails -like remoteusermailbox | where { $_.archivestatus -eq "None" } | foreach { 
+    $mailboxes | where recipienttypedetails -like remoteusermailbox | where { $_.archivestatus -eq "None" } | where {-not $_.managedfoldermailboxpolicy} | foreach { 
+        Log $("Adding archive mailbox for {0}" -f $_.userprincipalname);
         Enable-RemoteMailbox -Identity $_.userprincipalname -Archive;
+    }
+
+    # set auditing for all mailboxes which don't have it
+    $non_audit = $mailboxes | where {-not $_.AuditEnabled};
+    ForEach ($mb in $non_audit) {
+        $email = $mb.PrimarySmtpAddress;
+        Log $("Adding access audit rules for {0}" -f $email);
+        Set-RemoteMailbox -Identity $mb.userprincipalname -AuditEnabled $true -AuditAdmin 'SendAs' -AuditDelegate 'SendAs' -AuditOwner 'MailboxLogin';
     }
 
     # For each Exchange Online mailbox where it doesn't match, set the PrimarySmtpAddress to match the UserPrincipalName.
@@ -375,6 +397,7 @@ try {
     ForEach ($mb in Get-RemoteMailbox -ResultSize Unlimited | Where {-not ($_.RemoteRoutingAddress -like "*@dpaw.mail.onmicrosoft.com" )}) {
         $remote = $mb.EmailAddresses.SmtpAddress | Where {$_ -like "*@dpaw.mail.onmicrosoft.com"} | Select -First 1;
         If ($remote) {
+            Log $("Fixing remote routing rule for {0} to {1}" -f $mb.PrimarySmtpAddress,$remote);
             $mb | Set-RemoteMailbox -RemoteRoutingAddress $remote;
         }
     }
