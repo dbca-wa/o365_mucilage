@@ -33,6 +33,8 @@ if ($o365_updated) {
 }
 
 
+$cloud_only = $o365_users | where {-not $_.LastDirSyncTime};
+
 
 # Read the full user DB from OIM CMS (all DepartmentUser objects) via the OIM CMS API.
 # NOTE: $user_api is set in C:\cron\creds.psm1
@@ -50,7 +52,7 @@ $cmsusers_updated = $false;
 
 
 # set archiving for all cloud mailboxes which don't have it
-$non_archive = $mailboxes | where {$_.ArchiveState -eq 'None'} | where {$_.userprincipalname -notin $o365_users.UserPrincipalName};
+$non_archive = $mailboxes | where {$_.ArchiveStatus -eq 'None'} | where {$_.userprincipalname -in $cloud_only.UserPrincipalName} | where {-not $_.managedfoldermailboxpolicy};
 ForEach ($mb in $non_archive) {
     $email = $mb.PrimarySmtpAddress;
     Log $("Adding archive mailbox for {0}" -f $email);
@@ -62,7 +64,7 @@ $non_audit = $mailboxes | where {-not $_.AuditEnabled};
 ForEach ($mb in $non_audit) {
     $email = $mb.PrimarySmtpAddress;
     Log $("Adding access audit rules for {0}" -f $email);
-    Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-Mailbox -Identity $email -AuditEnabled $true -AuditAdmin 'SendAs' -AuditDelegate 'SendAs' -AuditOwner 'MailboxLogin' "));
+    Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-Mailbox -Identity `"$email`" -AuditEnabled `$true -AuditAdmin 'SendAs' -AuditDelegate 'SendAs' -AuditOwner 'MailboxLogin' "));
 }
 
 
