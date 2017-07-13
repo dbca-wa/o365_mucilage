@@ -344,15 +344,18 @@ try {
         $upn = $msoluser.UserPrincipalName;
         $existing = Get-ADUser -Filter { UserPrincipalName -like $upn };
         if ($existing) {
-            $immutableid = [System.Convert]::ToBase64String($existing.ObjectGUID.tobytearray());
-            Set-MsolUser -UserPrincipalName $upn -ImmutableId $immutableid;
+            # if we have 365 admin credentials, update the user object in Office 365 to have the right linking ID
+            if ($dw_write365) {
+                $immutableid = [System.Convert]::ToBase64String($existing.ObjectGUID.tobytearray());
+                Set-MsolUser -UserPrincipalName $upn -ImmutableId $immutableid;
+            }
             continue;
         }
         # ...create new user
         Log $("About to create O365 user: New-ADUser $username -Verbose -Path `"$new_user_ou`" -Enabled $true -UserPrincipalName $($msoluser.UserPrincipalName) -EmailAddress $($msoluser.UserPrincipalName) -DisplayName $($msoluser.DisplayName) -GivenName $($msoluser.FirstName) -Surname $($msoluser.LastName) -PasswordNotRequired $true");
         New-ADUser $username -Verbose -Path $new_user_ou -Enabled $true -UserPrincipalName $msoluser.UserPrincipalName -EmailAddress $msoluser.UserPrincipalName -DisplayName $msoluser.DisplayName -GivenName $msoluser.FirstName -Surname $msoluser.LastName -PasswordNotRequired $true;
         # ...wait for changes to propagate
-        sleep 10;
+        sleep 30;
         # ...assume RemoteRoutingAddress name is the same base as the UPN
         $rra = $msoluser.UserPrincipalName.Split("@", 2)[0]+"@dpaw.mail.onmicrosoft.com";
         Set-ADUser -Identity $username -Add @{'proxyAddresses'='SMTP:'+$msoluser.UserPrincipalName};
