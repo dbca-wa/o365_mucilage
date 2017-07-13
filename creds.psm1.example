@@ -21,6 +21,7 @@ $new_user_ou = "OU=Users,OU=GroupA,DC=example,DC=com";
 
 # directory wrangler steps 
 $dw_aadsync = $true;
+$dw_writeusername = $true;
 
 # Org units in OIM CMS to whitelist for AD writeback
 $org_whitelist = @(

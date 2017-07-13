@@ -93,10 +93,14 @@ try {
         if ($cmsUser) {
             # Find any cases where the AD user's email has been changed, and update the CMS user.
             if (-Not ($cmsUser.email -like $aduser.EmailAddress)) {
-                $simpleuser = $aduser | select ObjectGUID, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
+                $simpleuser = $aduser | select ObjectGUID, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
                 $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
                 if ($aduser.AccountExpirationDate) {
                     $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
+                }
+                # only write back username if enabled for this directory. avoids collisions in OIM CMS
+                if ($dw_writeusername) {
+                    $simpleuser | Add-Member -type NoteProperty -name SamAccountName -value $aduser.SamAccountName;
                 }
                 # ...convert the whole lot to JSON and push to OIM CMS via the REST API.
                 $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
@@ -233,10 +237,14 @@ try {
                 # ...find the mailbox object
                 $mb = $mailboxes | where userprincipalname -like $user.email;
                 # ...glom the mailbox object onto the AD object
-                $simpleuser = $aduser | select ObjectGUID, @{name="mailbox";expression={$mb}}, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
+                $simpleuser = $aduser | select ObjectGUID, @{name="mailbox";expression={$mb}}, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
                 $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
                 if ($aduser.AccountExpirationDate) {
                     $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
+                }
+                # only write back username if enabled for this directory. avoids collisions in OIM CMS
+                if ($dw_writeusername) {
+                    $simpleuser | Add-Member -type NoteProperty -name SamAccountName -value $aduser.SamAccountName;
                 }
                 # ...convert the whole lot to JSON and push to OIM CMS via the REST API.
                 $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
@@ -277,9 +285,13 @@ try {
         if ($aduser.enabled -eq $false) {
             if ($user.active) {
                 Log $("Marking {0} as 'Inactive' in the OIM CMS" -f $user.email);
-                $simpleuser = $aduser | select ObjectGUID,  info, DistinguishedName, Name, Title, SamAccountName, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
+                $simpleuser = $aduser | select ObjectGUID,  info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
                 if ($aduser.AccountExpirationDate) { 
                     $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
+                }
+                # only write back username if enabled for this directory. avoids collisions in OIM CMS
+                if ($dw_writeusername) {
+                    $simpleuser | Add-Member -type NoteProperty -name SamAccountName -value $aduser.SamAccountName;
                 }
                 $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
                 
