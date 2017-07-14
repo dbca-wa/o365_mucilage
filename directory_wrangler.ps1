@@ -230,9 +230,9 @@ try {
                     $except = $_;
                     Log $($except | convertto-json);
                 }
-            }
+
             # If the AD object was modified after the OIM CMS object, sync back to the CMS...
-            if (('Modified' -notin $user.ad_data.Keys) -or ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified))) {
+            } ElseIf (('Modified' -notin $user.ad_data.Keys) -or ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified))) {
                 #Write-Output $("Looks like {0} was updated in AD after the CMS, updating" -f $user.email);
                 # ...find the mailbox object
                 $mb = $mailboxes | where userprincipalname -like $user.email;
