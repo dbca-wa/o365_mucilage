@@ -19,11 +19,11 @@ try {
     $localgroups = Get-ADGroup -Filter * -SearchBase $unified_group_ou;
 
     # Remove groups missing online
-    if ($ugrps.Length -gt 100) {
-        $dead_groups = compare-object -Property Name $localgroups $ugrps | where sideindicator -like '<=' | foreach { Get-ADGroup -Filter "Name -like `"$($_.Name)`"" -SearchBase $unified_group_ou };
-        Log $("Removing missing unified groups: {0}" -f $($dead_groups -join ' | '));
-        $dead_groups | Remove-ADGroup -Confirm:$false;
-    }
+    #if ($ugrps.Length -gt 100) {
+    #    $dead_groups = compare-object -Property Name $localgroups $ugrps | where sideindicator -like '<=' | foreach { Get-ADGroup -Filter "Name -like `"$($_.Name)`"" -SearchBase $unified_group_ou };
+    #    Log $("Removing missing unified groups: {0}" -f $($dead_groups -join ' | '));
+    #    $dead_groups | Remove-ADGroup -Confirm:$false;
+    #}
     
     # create/update the rest of the shadow groups to match Exchange Online
     ForEach ($ugrp in $ugrps) {
@@ -101,7 +101,7 @@ try {
         }
         Set-DistributionGroup $group -Name $msolgroup.Alias -CustomAttribute1 $msolgroup.ExternalDirectoryObjectId -Alias $msolgroup.Alias -DisplayName $msolgroup.DisplayName -PrimarySmtpAddress $msolgroup.PrimarySmtpAddress;
         # only bother updating distribution group users which are synced to on-prem AD
-        $member_subset = $msolgroup.members | Where LastDirSyncTime | Where EmailAddress -in $adusers.userprincipalname;
+        $member_subset = $msolgroup.members | Where LastDirSyncTime; # | Where EmailAddress -in $adusers.userprincipalname;
         Update-DistributionGroupMember $group -Members $member_subset.EmailAddress  -BypassSecurityGroupManagerCheck -Confirm:$false;
         
         # we need to ensure an admin group is added as an owner the O365 group object. 
