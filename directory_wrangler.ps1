@@ -67,9 +67,9 @@ try {
         # Match on Active Directory GUID (not email, because that may change) - if absent, create a new user in the CMS.
         #if ($aduser.ObjectGUID -notin $users.objects.ad_guid) {
         #    $simpleuser = $aduser | select ObjectGUID, DistinguishedName, DisplayName, Title, SamAccountName, GivenName, Surname, EmailAddress, Modified, Enabled, AccountExpirationDate, pwdLastSet, employeeType;
-        #    $simpleuser.Modified = Get-Date $aduser.Modified -Format s;
+        #    $simpleuser.Modified = Get-Date $aduser.Modified -Format o;
         #    if ($aduser.AccountExpirationDate) {
-        #        $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
+        #        $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format o;
         #    }
         #    $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
         #    # For every push to the API, we need to explicitly convert to UTF8 bytes
@@ -93,10 +93,10 @@ try {
         if ($cmsUser) {
             # Find any cases where the AD user's email has been changed, and update the CMS user.
             if (-Not ($cmsUser.email -like $aduser.EmailAddress)) {
-                $simpleuser = $aduser | select ObjectGUID, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
+                $simpleuser = $aduser | select ObjectGUID, @{name="Modified";expression={Get-Date $_.Modified -Format o}}, info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
                 $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
                 if ($aduser.AccountExpirationDate) {
-                    $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
+                    $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format o;
                 }
                 # only write back username if enabled for this directory. avoids collisions in OIM CMS
                 if ($dw_writeusername) {
@@ -230,17 +230,17 @@ try {
                     $except = $_;
                     Log $($except | convertto-json);
                 }
-
+            
             # If the AD object was modified after the OIM CMS object, sync back to the CMS...
             } ElseIf (('Modified' -notin $user.ad_data.Keys) -or ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified))) {
                 #Write-Output $("Looks like {0} was updated in AD after the CMS, updating" -f $user.email);
                 # ...find the mailbox object
                 $mb = $mailboxes | where userprincipalname -like $user.email;
                 # ...glom the mailbox object onto the AD object
-                $simpleuser = $aduser | select ObjectGUID, @{name="mailbox";expression={$mb}}, @{name="Modified";expression={Get-Date $_.Modified -Format s}}, info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
+                $simpleuser = $aduser | select ObjectGUID, @{name="mailbox";expression={$mb}}, @{name="Modified";expression={Get-Date $_.Modified -Format o}}, info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
                 $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
                 if ($aduser.AccountExpirationDate) {
-                    $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
+                    $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format o;
                 }
                 # only write back username if enabled for this directory. avoids collisions in OIM CMS
                 if ($dw_writeusername) {
@@ -287,7 +287,7 @@ try {
                 Log $("Marking {0} as 'Inactive' in the OIM CMS" -f $user.email);
                 $simpleuser = $aduser | select ObjectGUID,  info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
                 if ($aduser.AccountExpirationDate) { 
-                    $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format s;
+                    $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format o;
                 }
                 # only write back username if enabled for this directory. avoids collisions in OIM CMS
                 if ($dw_writeusername) {
@@ -337,7 +337,7 @@ try {
     ForEach ($msoluser in $msolusers | where lastdirsynctime -eq $null | where UserPrincipalName -in $department_users.email) {
         $username = $msoluser.FirstName + $msoluser.LastName;
         if (!$username) {
-            $username = $msoluser.UserPrincipalName.Split("@", 2)[0].replace('.','').replace('#', '').replace(',', '')
+            $username = $msoluser.UserPrincipalName.Split("@", 2)[0].replace('.','').replace("'", '').replace('#', '').replace(',', '')
         }
         $username = $username.Substring(0,[System.Math]::Min(15, $username.Length));
         # ...link existing users 
@@ -352,14 +352,15 @@ try {
             continue;
         }
         # ...create new user
-        Log $("About to create O365 user: New-ADUser $username -Verbose -Path `"$new_user_ou`" -Enabled $true -UserPrincipalName $($msoluser.UserPrincipalName) -EmailAddress $($msoluser.UserPrincipalName) -DisplayName $($msoluser.DisplayName) -GivenName $($msoluser.FirstName) -Surname $($msoluser.LastName) -PasswordNotRequired $true");
-        New-ADUser $username -Verbose -Path $new_user_ou -Enabled $true -UserPrincipalName $msoluser.UserPrincipalName -EmailAddress $msoluser.UserPrincipalName -DisplayName $msoluser.DisplayName -GivenName $msoluser.FirstName -Surname $msoluser.LastName -PasswordNotRequired $true;
+        $sam = $msoluser.userprincipalname.split('@')[0].replace('.','').replace('#', '').replace(',', '');
+        Log $("About to create O365 user: New-ADUser $username -Verbose -Path `"$new_user_ou`" -Enabled $true -UserPrincipalName $($msoluser.UserPrincipalName) -SamAccountName $($sam) -EmailAddress $($msoluser.UserPrincipalName) -DisplayName $($msoluser.DisplayName) -GivenName $($msoluser.FirstName) -Surname $($msoluser.LastName) -PasswordNotRequired $true");
+        New-ADUser $username -Verbose -Path $new_user_ou -Enabled $true -UserPrincipalName $msoluser.UserPrincipalName -SamAccountName $sam -EmailAddress $msoluser.UserPrincipalName -DisplayName $msoluser.DisplayName -GivenName $msoluser.FirstName -Surname $msoluser.LastName -PasswordNotRequired $true;
         # ...wait for changes to propagate
         sleep 30;
         # ...assume RemoteRoutingAddress name is the same base as the UPN
         $rra = $msoluser.UserPrincipalName.Split("@", 2)[0]+"@dpaw.mail.onmicrosoft.com";
-        Set-ADUser -Identity $username -Add @{'proxyAddresses'='SMTP:'+$msoluser.UserPrincipalName};
-        Set-ADUser -Identity $username -Add @{'proxyAddresses'='smtp:'+$rra};
+        Set-ADUser -Identity $msoluser.UserPrincipalName -Add @{'proxyAddresses'='SMTP:'+$msoluser.UserPrincipalName};
+        Set-ADUser -Identity $msoluser.UserPrincipalName -Add @{'proxyAddresses'='smtp:'+$rra};
         # ...add remotemailbox object
         Enable-RemoteMailbox -Identity $msoluser.UserPrincipalName -PrimarySmtpAddress $msoluser.UserPrincipalName -RemoteRoutingAddress $rra;
     }

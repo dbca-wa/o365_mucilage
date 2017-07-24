@@ -84,7 +84,7 @@ ForEach ($user in $untracked_users) {
     $simpleuser =  $user |   select @{name='ObjectGUID'; expression={$null}},
                                     @{name='EmailAddress'; expression={$_.userprincipalname}}, 
                                     @{name='DistinguishedName'; expression={$null}}, 
-                                    @{name='SamAccountName'; expression={$_.userprincipalname.split('@')[0].replace('.','').replace('#', '').replace(',', '')}}, 
+                                    @{name='SamAccountName'; expression={$_.userprincipalname.split('@')[0].replace('.','').replace("'", '').replace('#', '').replace(',', '')}}, 
                                     @{name='AccountExpirationDate'; expression={$null}}, 
                                     @{name='Enabled'; expression={$false}},
                                     @{name='DisplayName'; expression={$_.DisplayName}}, 
