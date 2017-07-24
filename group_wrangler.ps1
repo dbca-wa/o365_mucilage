@@ -9,7 +9,6 @@ Function Log {
 }
 
 # download distribution group list from Exchange Online
-$dgrps = Invoke-command -session $session -Command { Get-DistributionGroup -ResultSize unlimited };
 $ugrps = Invoke-command -session $session -Command { Get-UnifiedGroup -ResultSize unlimited };
 
 Log $("Processing {0} unified groups" -f $ugrps.Length);
@@ -56,33 +55,23 @@ try {
     Log $($_ | convertto-json);
 }
 
-Log $("Processing {0} distribution groups" -f $dgrps.Length);
+
+
 
 try {
     # filter the Exchange Online groups list for groups that are "In cloud", and
     # don't include the above org-derived groups (i.e. Alias doesn't have db- prefix)
-    $msolgroups = $dgrps | where isdirsynced -eq $false | where Alias -notlike db-* | select @{name="members";expression={Get-MsolGroupMember -All -GroupObjectId $_.ExternalDirectoryObjectId}}, *;
+    $msolgroups = Invoke-command -session $session -Command { Get-DistributionGroup -ResultSize unlimited } | where isdirsynced -eq $false | where Alias -notlike db-*;
     Log $("Syncing {0} MailSecurity groups" -f $msolgroups.length);
     
     # fetch all the shadow groups from the local AD
     $localgroups = Get-DistributionGroup -OrganizationalUnit $mail_security_ou -ResultSize Unlimited;
     
     # Define user object attributes that we care about.
-    $keynames = @("Title", "DisplayName", "GivenName", "Surname", "Company", "physicalDeliveryOfficeName", "StreetAddress", 
-        "Division", "Department", "Country", "State", "wWWHomePage", "Manager", "EmployeeID", "EmployeeNumber", "HomePhone",
-        "telephoneNumber", "Mobile", "Fax", "employeeType");
-    $adprops = $keynames + @("EmailAddress", "UserPrincipalName", "Modified", "AccountExpirationDate", "Info", "pwdLastSet");
+    #$adprops = @("DisplayName", "EmailAddress", "UserPrincipalName", "Modified");
     
-    # Read the user list from AD. Apply a rough filter for accounts we want to load into OIM CMS:
-    # - email address is *.wa.gov.au or dpaw.onmicrosoft.com
-    # - DN contains a sub-OU called "Users"
-    # - DN does not contain a sub-OU with "Administrators" in the name
-    $adusers = @();
-    ForEach ($ou in $user_ous) {
-        $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@*wa.gov.au"} -Properties $adprops -SearchBase $ou;
-        $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@rottnestisland.com"} -Properties $adprops -SearchBase $ou;
-    }
-    $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@dpaw.onmicrosoft.com"} -Properties $adprops;
+    # Read the user list from AD.
+    #$adusers = Get-ADUser -server $adserver -Filter * -Properties $adprops;
 
     # delete any shadow groups where the original is no longer online
     # WARNING: uncomment below line for occasional purges only! sometimes Office 365 will 
@@ -96,13 +85,37 @@ try {
         $group = $localgroups | where CustomAttribute1 -like $msolgroup.ExternalDirectoryObjectId;
         $name = $msolgroup.Alias.replace("`r", "").replace("`n", " ").TrimEnd();
         if (-not $group) { 
-            Log $("Creating new MailSecurity group: {0}" -f $name);
-            $group = New-DistributionGroup -OrganizationalUnit $mail_security_ou -PrimarySmtpAddress $msolgroup.PrimarySmtpAddress -Name $name -Type Security;
+            try {
+                Log $("Creating new MailSecurity group: {0}" -f $name);
+                $group = New-DistributionGroup -OrganizationalUnit $mail_security_ou -PrimarySmtpAddress $msolgroup.PrimarySmtpAddress -Name $name -Type Security;
+                sleep 10;
+            } catch [System.Exception] {
+                Log $("Failed! Possibly the group has a duplicate?")
+                Log $($_ | convertto-json);
+                continue;
+            }
         }
+        Write-Host $group;
         Set-DistributionGroup $group -Name $msolgroup.Alias -CustomAttribute1 $msolgroup.ExternalDirectoryObjectId -Alias $msolgroup.Alias -DisplayName $msolgroup.DisplayName -PrimarySmtpAddress $msolgroup.PrimarySmtpAddress;
-        # only bother updating distribution group users which are synced to on-prem AD
-        $member_subset = $msolgroup.members | Where LastDirSyncTime; # | Where EmailAddress -in $adusers.userprincipalname;
-        Update-DistributionGroupMember $group -Members $member_subset.EmailAddress  -BypassSecurityGroupManagerCheck -Confirm:$false;
+        
+
+        $lmembers = Get-ADGroupMember $group.DistinguishedName;
+        if (-not $lmembers) { $lmembers = @() };
+        $members = Get-MsolGroupMember -All -GroupObjectId $msolgroup.ExternalDirectoryObjectId | foreach { if($_.EmailAddress){ Get-ADUser -Filter "EmailAddress -like `"$($_.EmailAddress)`"" }}
+        if (-not $members) { $members = @() };
+        # Update memberships
+        $diff = Compare-Object $lmembers $members;
+        $toadd = $diff | where sideindicator -like '=>' | select -ExpandProperty inputobject;
+        if ($toadd) { 
+            Log $("Adding members to group {0}: {1}" -f $group.name, $($toadd -join ' | '));
+            Add-ADGroupMember $group.DistinguishedName -Members $toadd -Confirm:$false; 
+        }
+        $todel = $diff | where sideindicator -like '<=' | select -ExpandProperty inputobject;
+        if ($todel) { 
+            Log $("Removing members from group {0}: {1}" -f $group.name, $($todel -join ' | '));
+            #Remove-ADGroupMember $group.DistinguishedName -Members $todel -Confirm:$false; 
+        }
+        
         
         # we need to ensure an admin group is added as an owner the O365 group object. 
         # why? because without this, even God Mode Exchange admins can't use ECP to manage the group owners! 
@@ -112,6 +125,9 @@ try {
         #Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-DistributionGroup -Identity $gsmtp -ManagedBy @{Add=`"$admin_msolgroup`"} -BypassSecurityGroupManagerCheck"));
         
     }
+
+
+
 } catch [System.Exception] {
     Log "ERROR: Exception caught, skipping rest of MailSecurity";
     Log $($_ | convertto-json);
