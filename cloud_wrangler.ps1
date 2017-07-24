@@ -8,6 +8,8 @@ Function Log {
    Add-content "C:\cron\cloud_wrangler.log" -value $output;
 }
 
+Log "Loading cloud information...";
+
 # get all of the mailboxes from 365
 $mailboxes = Invoke-command -session $session -Command { Get-Mailbox -ResultSize unlimited };
 
@@ -56,7 +58,7 @@ $non_archive = $mailboxes | where {$_.ArchiveStatus -eq 'None'} | where {$_.user
 ForEach ($mb in $non_archive) {
     $email = $mb.PrimarySmtpAddress;
     Log $("Adding archive mailbox for {0}" -f $email);
-    Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Enable-Mailbox -Identity $email -Archive"));
+    Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Enable-Mailbox -Identity `"$email`" -Archive"));
 }
 
 # set auditing for all mailboxes which don't have it
@@ -67,6 +69,14 @@ ForEach ($mb in $non_audit) {
     Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-Mailbox -Identity `"$email`" -AuditEnabled `$true -AuditAdmin 'SendAs' -AuditDelegate 'SendAs' -AuditOwner 'MailboxLogin' "));
 }
 
+
+# set litigation hold for all mailboxes which don't have it
+#$non_hold = $mailboxes | where {($_.RecipientTypeDetails -eq "UserMailbox") -and (-not $_.LitigationHoldEnabled)};
+#ForEach ($mb in $non_hold) {
+#    $email = $mb.PrimarySmtpAddress;
+#    Log $("Adding litigation hold rule for {0}" -f $email);
+#    Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-Mailbox -Identity `"$email`" -LitigationHoldEnabled `$true"));
+#}
 
 $untracked_users = $o365_users | where {$_.userprincipalname -notin $users.objects.email};
 
@@ -102,3 +112,5 @@ ForEach ($user in $untracked_users) {
         Log $($userjson);
     }
 }
+
+Log "Finished";
