@@ -359,7 +359,8 @@ try {
         sleep 180;
         # ...assume RemoteRoutingAddress name is the same base as the UPN
         $rra = $msoluser.UserPrincipalName.Split("@", 2)[0]+"@dpaw.mail.onmicrosoft.com";
-        Set-ADUser -Identity $sam -Add @{'proxyAddresses'=('SMTP:'+$msoluser.UserPrincipalName,'smtp:'+$rra)};
+        Set-ADUser -Identity $sam -Add @{'proxyAddresses'=('SMTP:'+$msoluser.UserPrincipalName)};
+        Set-ADUser -Identity $sam -Add @{'proxyAddresses'=('smtp:'+$rra)};
         # ...add remotemailbox object
         Enable-RemoteMailbox -Identity $msoluser.UserPrincipalName -PrimarySmtpAddress $msoluser.UserPrincipalName -RemoteRoutingAddress $rra;
     }

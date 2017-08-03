@@ -3,7 +3,9 @@ $ErrorActionPreference = "Stop";
 
 Function Log {
    Param ([string]$logstring)
-   Add-content "C:\cron\org_wrangler.log" -value $("{0} ({1} - {2}): {3}" -f $(Get-Date), $(GCI $MyInvocation.PSCommandPath | Select -Expand Name), $pid, $logstring);
+   $output = $("{0} ({1} - {2}): {3}" -f $(Get-Date), $(GCI $MyInvocation.PSCommandPath | Select -Expand Name), $pid, $logstring);
+   Write-Host $output;
+   Add-content "C:\cron\org_wrangler.log" -value $output;
 }
 
 # download distribution group list from Exchange Online
@@ -25,6 +27,13 @@ Function smash-groups {
         $name = $grp.name.Substring(0,[System.Math]::Min(64, $grp.name.Length)).replace("`r", "").replace("`n", " ").TrimEnd();
         $id, $email, $dname, $owner = $grp.id, $grp.email, $grp.name, $grp.owner;
         
+        # hack to avoid updating groups for domains in transit
+        $domain = $email.Split('@', 2)[1];
+        If ($domain -in $domain_skip) {
+            Log $('Skipping group {0} due to domain {1}' -f $dname,$domain)
+            Continue;
+        }
+
         # check if the owner is in the O365 directory
         # FIXME: support@dpaw.wa.gov.au isn't a UPN? which then breaks this
         #If ($owner -notin $users.UserPrincipalName) {
