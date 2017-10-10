@@ -37,7 +37,7 @@ try {
     $keynames = @("Title", "DisplayName", "GivenName", "Surname", "Company", "physicalDeliveryOfficeName", "StreetAddress", 
         "Division", "Department", "Country", "State", "wWWHomePage", "Manager", "EmployeeID", "EmployeeNumber", "HomePhone",
         "telephoneNumber", "Mobile", "Fax", "employeeType");
-    $adprops = $keynames + @("EmailAddress", "UserPrincipalName", "Modified", "AccountExpirationDate", "Info", "pwdLastSet");
+    $adprops = $keynames + @("EmailAddress", "UserPrincipalName", "Modified", "AccountExpirationDate", "Info", "pwdLastSet", "targetAddress");
     
     # Read the user list from AD. Apply a rough filter for accounts we want to load into OIM CMS:
     # - email address is *.wa.gov.au or dpaw.onmicrosoft.com
@@ -61,34 +61,7 @@ try {
     #Write-Output "UPDATING OIM CMS FROM AD DATA";
     
     ForEach ($aduser in $adusers) {
-
-        # DEPRECATED: we no longer create new CMS DepartmentUser objects here, that happens in cloud_wrangler
-        # If an AD user doesn't exist in the OIM CMS, load the data from current AD record via the REST API.
-        # Match on Active Directory GUID (not email, because that may change) - if absent, create a new user in the CMS.
-        #if ($aduser.ObjectGUID -notin $users.objects.ad_guid) {
-        #    $simpleuser = $aduser | select ObjectGUID, DistinguishedName, DisplayName, Title, SamAccountName, GivenName, Surname, EmailAddress, Modified, Enabled, AccountExpirationDate, pwdLastSet, employeeType;
-        #    $simpleuser.Modified = Get-Date $aduser.Modified -Format o;
-        #    if ($aduser.AccountExpirationDate) {
-        #        $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format o;
-        #    }
-        #    $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
-        #    # For every push to the API, we need to explicitly convert to UTF8 bytes
-        #    # to avoid the stupid moon-man encoding Windows uses for strings.
-        #    # Without this, e.g. users with Unicode names will fail as the server expects UTF8.
-        #    $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
-        #    # Here we POST to the API endpoint to create a new DepartmentUser in the CMS.
-        #    try {
-        #        Log $("Creating a new OIM CMS object for {0}" -f $aduser.EmailAddress);
-        #        $response = Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession;
-        #        # Note that a change has occurred.
-        #        $cmsusers_updated = $true;
-        #    } catch [System.Exception] {
-        #        # Log any failures to sync AD data into the OIM CMS, for reference.
-        #        Log $("ERROR: creating new OIM CMS user failed for {0}" -f $aduser.EmailAddress);
-        #        Log $_.Exception.ToString();
-        #        Log $($userjson);
-        #    }
-        #} else {
+        # NOTE: we no longer create new CMS DepartmentUser objects here, that happens in cloud_wrangler
         $cmsUser = $user_guid[$aduser.ObjectGUID];
         if ($cmsUser) {
             # Find any cases where the AD user's email has been changed, and update the CMS user.
@@ -114,13 +87,18 @@ try {
                 } catch [System.Exception] {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
                     Log $("ERROR: updating OIM CMS failed for {0}" -f $cmsUser.email);
-                    Log $_.Exception.ToString();
-                    Log $($simpleuser | ConvertTo-Json);
+                    Log $("Endpoint: {0}" -f $user_update_api);
+                    Log $("Payload: {0}" -f $simpleuser | ConvertTo-Json);
+                    $result = $_.Exception.Response.GetResponseStream();
+                    $reader = New-Object System.IO.StreamReader($result);
+                    $reader.BaseStream.Position = 0;
+                    $reader.DiscardBufferedData();
+                    $responseBody = $reader.ReadToEnd();
+                    Log $("Response: {0}" -f $responseBody);
                 }
             }
         }
     }
-
 
     ###########################
     ##### OIM CMS 2-WAY UPDATE
@@ -159,11 +137,17 @@ try {
                     $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
                     # Note that a change has occurred.
                     $cmsusers_updated = $true;
-                } catch [System.Exception] {
+                } catch  {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
                     Log $("ERROR: updating OIM CMS failed for {0}" -f $user.email);
-                    Log $_.Exception.ToString();
-                    Log $($simpleuser | ConvertTo-Json);
+                    Log $("Endpoint: {0}" -f $user_update_api);
+                    Log $("Payload: {0}" -f $simpleuser | ConvertTo-Json);
+                    $result = $_.Exception.Response.GetResponseStream();
+                    $reader = New-Object System.IO.StreamReader($result);
+                    $reader.BaseStream.Position = 0;
+                    $reader.DiscardBufferedData();
+                    $responseBody = $reader.ReadToEnd();
+                    Log $("Response: {0}" -f $responseBody);
                 }
             }
             continue;
@@ -218,7 +202,7 @@ try {
                         Set-ADUser -verbose -server $adserver $aduser -clear thumbnailPhoto;
                     }
                     
-                    # if there's an email address change, use outlook
+                    # If there's an email address change, use Outlook
                     If ($user.email -and ($aduser.emailaddress -ne $user.email)) {
                         Log $("Updating email address for {0} to {1}" -f $aduser.EmailAddress,$user.email);
                         Set-RemoteMailbox -Identity $aduser.emailaddress -PrimarySmtpAddress $user.email -EmailAddressPolicyEnabled $false;
@@ -255,14 +239,19 @@ try {
                     $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
                 } catch [System.Exception] {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
-                    Log $("ERROR: updating OIM CMS failed for {0}" -f $user.email);
-                    Log $_.Exception.ToString();
-                    Log $($simpleuser | ConvertTo-Json);
+                    Log $("ERROR: updating OIM CMS failed for {0}" -f $cmsUser.email);
+                    Log $("Endpoint: {0}" -f $user_update_api);
+                    Log $("Payload: {0}" -f $simpleuser | ConvertTo-Json);
+                    $result = $_.Exception.Response.GetResponseStream();
+                    $reader = New-Object System.IO.StreamReader($result);
+                    $reader.BaseStream.Position = 0;
+                    $reader.DiscardBufferedData();
+                    $responseBody = $reader.ReadToEnd();
+                    Log $("Response: {0}" -f $responseBody);
                 }
             }
         } Else {
             #Write-Output $("Couldn't find {0}!" -f $user.email);
-            #Log $("Couldn't find {0} in AD!" -f $user.email);
             # No AD object found - mark the user as "AD deleted" in the CMS (if it's not already).
             If (-Not $user.ad_deleted) {
                 $body = @{EmailAddress=$user.email; Deleted="true"};
@@ -275,8 +264,14 @@ try {
                 } catch [System.Exception] {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
                     Log $("ERROR: failed to update OIM CMS user {0} as deleted in Active Directory" -f $user.email);
-                    Log $_.Exception.ToString();
-                    Log $($jsonbody);
+                    Log $("Endpoint: {0}" -f $user_update_api);
+                    Log $("Payload: {0}" -f $body | ConvertTo-Json);
+                    $result = $_.Exception.Response.GetResponseStream();
+                    $reader = New-Object System.IO.StreamReader($result);
+                    $reader.BaseStream.Position = 0;
+                    $reader.DiscardBufferedData();
+                    $responseBody = $reader.ReadToEnd();
+                    Log $("Response: {0}" -f $responseBody);
                 }
             }
         }
@@ -302,8 +297,14 @@ try {
                 } catch [System.Exception] {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
                     Log $("ERROR: failed to update {0} as inactive in OIM CMS" -f $user.email);
-                    Log $_.Exception.ToString();
-                    Log $($simpleuser | ConvertTo-Json);
+                    Log $("Endpoint: {0}" -f $user_update_api);
+                    Log $("Payload: {0}" -f $simpleuser | ConvertTo-Json);
+                    $result = $_.Exception.Response.GetResponseStream();
+                    $reader = New-Object System.IO.StreamReader($result);
+                    $reader.BaseStream.Position = 0;
+                    $reader.DiscardBufferedData();
+                    $responseBody = $reader.ReadToEnd();
+                    Log $("Response: {0}" -f $responseBody);
                 }
             }
         }
@@ -374,6 +375,18 @@ try {
         $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@*wa.gov.au"} -Properties $adprops -SearchBase $ou;
     }
     $adusers += Get-ADUser -server $adserver -Filter {EmailAddress -like "*@dpaw.onmicrosoft.com"} -Properties $adprops;
+
+    # search for records with a busted/missing RRA
+    $busted = $adusers | where {($_.enabled -and -not $_.targetAddress)};
+    foreach ($aduser in $busted) {
+        $ms = $msolusers | where {$_.immutableId -eq [System.Convert]::ToBase64String($aduser.ObjectGUID.tobytearray())};
+        if ($ms -and ($ms.licenses)) {
+            $rra = $aduser.EmailAddress.Split("@", 2)[0]+"@dpaw.mail.onmicrosoft.com";
+            Log $("Fixing RemoteMailbox for {0} {1} {2}" -f $aduser.EmailAddress, $aduser.userprincipalname, $rra);
+            Enable-RemoteMailbox -Identity $aduser.userprincipalname -PrimarySmtpAddress $aduser.EmailAddress -RemoteRoutingAddress $rra
+            $aduser | Set-ADUser -Add @{'proxyAddresses'=('smtp:'+$rra)};
+        }
+    }
 
     # Rig the UPN for each user account so that it matches the primary SMTP address.
     foreach ($aduser in $adusers | where {$_.emailaddress -and ($_.emailaddress -ne $_.userprincipalname)}) {
