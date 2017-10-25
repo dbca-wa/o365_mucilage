@@ -65,7 +65,11 @@ try {
         # If the CMS user is flagged for an update, invoke the API and update the object.
         If ($updateUser) {
             $jsonbody = $body | ConvertTo-Json;
-            $user_update_api = $user_api + '{0}/' -f $cmsUser.ad_guid;
+            if ($cmsUser.ad_guid) {
+                $user_update_api = $user_api + '{0}/' -f $cmsUser.ad_guid;
+            } else {
+                $user_update_api = $user_api + '{0}/' -f $cmsUser.email;
+            }
 
             try {
                 # Invoke the API.

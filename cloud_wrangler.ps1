@@ -71,17 +71,18 @@ ForEach ($mb in $non_audit) {
 
 
 # set litigation hold for all mailboxes which don't have it
-#$non_hold = $mailboxes | where {($_.RecipientTypeDetails -eq "UserMailbox") -and (-not $_.LitigationHoldEnabled)};
-#ForEach ($mb in $non_hold) {
-#    $email = $mb.PrimarySmtpAddress;
-#    Log $("Adding litigation hold rule for {0}" -f $email);
-#    Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-Mailbox -Identity `"$email`" -LitigationHoldEnabled `$true"));
-#}
+$non_hold = $mailboxes | where {($_.RecipientTypeDetails -eq "UserMailbox") -and (-not $_.LitigationHoldEnabled)};
+ForEach ($mb in $non_hold) {
+    $email = $mb.PrimarySmtpAddress;
+    Log $("Adding litigation hold rule for {0}" -f $email);
+    Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-Mailbox -Identity `"$email`" -LitigationHoldEnabled `$true"));
+}
 
 $untracked_users = $o365_users | where {$_.userprincipalname -notin $users.objects.email};
 
 ForEach ($user in $untracked_users) {
     $simpleuser =  $user |   select @{name='ObjectGUID'; expression={$null}},
+                                    @{name='azure_guid'; expression={$_.ObjectId.Guid}},
                                     @{name='EmailAddress'; expression={$_.userprincipalname}}, 
                                     @{name='DistinguishedName'; expression={$null}}, 
                                     @{name='SamAccountName'; expression={$_.userprincipalname.split('@')[0].replace('.','').replace("'", '').replace('#', '').replace(',', '')}}, 
@@ -101,15 +102,21 @@ ForEach ($user in $untracked_users) {
     # Here we POST to the API endpoint to create a new DepartmentUser in the CMS.
     try {
         Log $("Creating a new OIM CMS object for {0}" -f $simpleuser.EmailAddress);
-        Write-Host $("Creating a new OIM CMS object for {0} ({1})" -f $simpleuser.EmailAddress, $simpleuser.SamAccountName);
+        #Write-Host $("Creating a new OIM CMS object for {0} ({1})" -f $simpleuser.EmailAddress, $simpleuser.SamAccountName);
         $response = Invoke-RestMethod $user_api -Body $userjson -Method Post -ContentType "application/json" -Verbose -WebSession $oimsession;
         # Note that a change has occurred.
         $cmsusers_updated = $true;
     } catch [System.Exception] {
-        # Log any failures to sync AD data into the OIM CMS, for reference.
+        # Log any failures to sync O365 data into the OIM CMS, for reference.
         Log $("ERROR: creating new OIM CMS user failed for {0}" -f $simpleuser.EmailAddress);
-        Log $_.Exception.ToString();
-        Log $($userjson);
+        Log $("Endpoint: {0}" -f $user_api);
+        Log $("Payload: {0}" -f $simpleuser | ConvertTo-Json);
+        $result = $_.Exception.Response.GetResponseStream();
+        $reader = New-Object System.IO.StreamReader($result);
+        $reader.BaseStream.Position = 0;
+        $reader.DiscardBufferedData();
+        $responseBody = $reader.ReadToEnd();
+        Log $("Response: {0}" -f $responseBody);   
     }
 }
 
