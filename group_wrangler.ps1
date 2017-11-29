@@ -1,4 +1,4 @@
-﻿Import-Module -Force 'C:\cron\creds.psm1';
+Import-Module -Force 'C:\cron\creds.psm1';
 $ErrorActionPreference = "Stop";
 
 Function Log {
@@ -29,6 +29,7 @@ try {
         $group = $localgroups | where Name -like $ugrp.Name;
         if (-not $group) { 
             Log $("Creating new unified group: {0}" -f $ugrp.Name);
+            Log $('$group = New-ADGroup -GroupScope Universal -Path {0} -Name {1} -DisplayName {2};' -f $unified_group_ou,$ugrp.Name,$ugrp.DisplayName);
             $group = New-ADGroup -GroupScope Universal -Path $unified_group_ou -Name $ugrp.Name -DisplayName $ugrp.DisplayName;
             Continue; # skip trying to populate freshly created group, give it some time to replicate
         }
@@ -87,6 +88,7 @@ try {
         if (-not $group) { 
             try {
                 Log $("Creating new MailSecurity group: {0}" -f $name);
+                Log $('$group = New-DistributionGroup -OrganizationalUnit {0} -PrimarySmtpAddress {1} -Name {2} -Type Security;' -f $mail_security_ou,$msolgroup.PrimarySmtpAddress,$name);
                 $group = New-DistributionGroup -OrganizationalUnit $mail_security_ou -PrimarySmtpAddress $msolgroup.PrimarySmtpAddress -Name $name -Type Security;
                 sleep 10;
             } catch [System.Exception] {
