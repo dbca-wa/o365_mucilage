@@ -19,14 +19,24 @@ $user_ous = ("OU=Users,OU=GroupA,DC=example,DC=com", "OU=Users,OU=GroupB,DC=exam
 # Default OU to put new users into
 $new_user_ou = "OU=Users,OU=GroupA,DC=example,DC=com";
 
+# Domain DN to filter OIM CMS ad_dn against
+$domain_DN = "*,DC=example,DC=com";
+
 # directory wrangler steps 
 $dw_aadsync = $true;
 $dw_writeusername = $true;
 $dw_write365 = $true;
 
-# Org units in OIM CMS to whitelist for AD writeback
+# Org units in OIM CMS to whitelist for creating new Users in AD
 $org_whitelist = @(
-    1, # organization.OrgUnit with id=1
+    2,
+    3,
+    4
+);
+
+# Org units that contain the full scope of department users
+$org_global = @(
+    1
 );
 
 # PrimarySMTPAddress of Exchange Online group containing admin users

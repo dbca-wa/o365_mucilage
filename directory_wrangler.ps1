@@ -120,7 +120,10 @@ try {
     # filter OIM CMS DepartmentUsers by whitelisted OrgUnit
     # this is to allow multiple directory writeback
 
-    $department_users = $users.objects | Where {$_.org_data.units.id | Where {$org_whitelist -contains $_} };
+    #$department_users = $users.objects | Where {$_.org_data.units.id | Where {$org_whitelist -contains $_} };
+    
+    $department_users = $users.objects | Where {$_.ad_dn -like $domain_dn} | Where {$_.org_data.units.id | Where {$org_global -contains $_} };
+    $department_users += $users.objects | Where {-not $_.ad_dn } | Where {$_.org_data.units.id | Where {$org_whitelist -contains $_} };
 
     # For each OIM CMS DepartmentUser...
     foreach ($user in $department_users) {
@@ -414,7 +417,7 @@ try {
     #    Set-RemoteMailbox $_.userprincipalname -PrimarySmtpAddress $_.userprincipalname -EmailAddressPolicyEnabled $false -Verbose;
     #}
 
-    # Quick loop to fix RemteRoutingAddress; previously some RemoteMailbox objects were provisioned manually with the wrong one.
+    # Quick loop to fix RemoteRoutingAddress; previously some RemoteMailbox objects were provisioned manually with the wrong one.
     ForEach ($mb in Get-RemoteMailbox -ResultSize Unlimited | Where {-not ($_.RemoteRoutingAddress -like "*@dpaw.mail.onmicrosoft.com" )}) {
         $remote = $mb.EmailAddresses.SmtpAddress | Where {$_ -like "*@dpaw.mail.onmicrosoft.com"} | Select -First 1;
         If ($remote) {
@@ -426,7 +429,7 @@ try {
 } catch [System.Exception] {
     Log "ERROR: Exception caught, dying =(";
     $except = $_;
-    Log $($except | convertto-json);
+    Log $($except);#| convertto-json);
 }
 
 # Final clean up.
