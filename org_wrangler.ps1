@@ -1,4 +1,4 @@
-﻿Import-Module -Force 'C:\cron\creds.psm1';
+Import-Module -Force 'C:\cron\creds.psm1';
 $ErrorActionPreference = "Stop";
 
 Function Log {
@@ -65,7 +65,11 @@ Function smash-groups {
             # bump email and try again
             $email = $email.split("@")[0]+"-orgunit@"+$email.split("@")[1];
             Log "Set-DistributionGroup `"$id`" -Name `"$name`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy `"$owner`" -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false";
-            Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-DistributionGroup `"$id`" -Name `"$name`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy `"$owner`" -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
+            try {
+                Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-DistributionGroup `"$id`" -Name `"$name`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy `"$owner`" -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
+            } catch [System.Exception] {
+                Log "Failed to update distribution group, need to manually check!";
+            }
         }
 
         
