@@ -34,6 +34,15 @@ if ($o365_updated) {
     $o365_users = Get-MsolUser -All;
 }
 
+# Enforce MFA for all users
+$mfaauth = New-Object -TypeName Microsoft.Online.Administration.StrongAuthenticationRequirement
+$mfaauth.RelyingParty = "*"
+$mfaauth.State = "Enforced"
+ForEach ($user in ($o365_users | where { $_.StrongAuthenticationRequirements.State -ne "Enforced" })) {
+    Log $("Enforcing MFA for {0}" -f $user.UserPrincipalName)
+    Set-MsolUser -UserPrincipalName $user.UserPrincipalName -StrongAuthenticationRequirements $mfaauth
+}
+
 
 $cloud_only = $o365_users | where {-not $_.LastDirSyncTime};
 
