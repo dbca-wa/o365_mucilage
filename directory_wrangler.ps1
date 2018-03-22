@@ -175,11 +175,14 @@ try {
                 #}
                 $aduser.Department = $user.gal_department;
                 $aduser.Country, $aduser.State = "AU", "Western Australia";
-                $aduser.wWWHomePage = "https://oim.dpaw.wa.gov.au/address-book/user-details?email=" + $user.email;
+                $aduser.wWWHomePage = "https://oim.dbca.wa.gov.au/address-book/user-details?email=" + $user.email;
                 $aduser.EmployeeNumber, $aduser.EmployeeID = $user.employee_id, $user.employee_id;
                 $aduser.telephoneNumber, $aduser.Mobile = $user.telephone, $user.mobile_phone;
                 $aduser.Fax = $user.org_unit__location__fax;
                 $aduser.employeeType = $user.account_type + " " + $user.position_type;
+                if ($user.org_data.cost_centre) {
+                    $aduser.Description = $user.org_data.cost_centre.code + " - " + $user.org_data.cost_centre.name;
+                }
                 # If the user has an account expiry date set that in AD.
                 if ($user.expiry_date) {
                     $aduser.AccountExpirationDate = $(Get-Date $user.expiry_date);
