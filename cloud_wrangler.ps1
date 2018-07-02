@@ -34,13 +34,19 @@ if ($o365_updated) {
     $o365_users = Get-MsolUser -All;
 }
 
-# Enforce MFA for all users
+# Enforce MFA for all synced users
 $mfaauth = New-Object -TypeName Microsoft.Online.Administration.StrongAuthenticationRequirement
 $mfaauth.RelyingParty = "*"
 $mfaauth.State = "Enforced"
-ForEach ($user in ($o365_users | where { $_.StrongAuthenticationRequirements.State -ne "Enforced" })) {
-    Log $("Enforcing MFA for {0}" -f $user.UserPrincipalName)
-    Set-MsolUser -UserPrincipalName $user.UserPrincipalName -StrongAuthenticationRequirements $mfaauth
+ForEach ($user in ($o365_users | where { ($_.StrongAuthenticationRequirements.State -ne "Enforced") })) {
+    try {
+        Log $("Enforcing MFA for {0}" -f $user.UserPrincipalName)
+        Set-MsolUser -UserPrincipalName $user.UserPrincipalName -StrongAuthenticationRequirements $mfaauth
+    } catch [System.Exception] {
+        Log "ERROR: Couldn't run Set-MsolUser";
+        $except = $_;
+        Log $($except);#| convertto-json);
+    }
 }
 
 
@@ -49,7 +55,7 @@ $cloud_only = $o365_users | where {-not $_.LastDirSyncTime};
 
 # Read the full user DB from OIM CMS (all DepartmentUser objects) via the OIM CMS API.
 # NOTE: $user_api is set in C:\cron\creds.psm1
-$users = Invoke-RestMethod ("{0}?all" -f $user_api) -WebSession $oimsession;
+$users = Invoke-RestMethod ("{0}?all" -f $user_api) -WebSession $oimsession -TimeoutSec 300;
 # Deserialise response into JSON (bypass the MaxJsonLength property of 2 MB).
 if (-not $users.objects) {
     [void][System.Reflection.Assembly]::LoadWithPartialName("System.Web.Extensions");
