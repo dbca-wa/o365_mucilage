@@ -14,10 +14,6 @@ try {
     # Store the domain max password age in days.
     $DefaultmaxPasswordAgeDays = (Get-ADDefaultDomainPasswordPolicy).MaxPasswordAge.Days;
 
-    # Get all the mailbox records (local Mailboxes and Office 365 RemoteMailboxes)
-    $mailboxes = $(Get-Mailbox -ResultSize unlimited | select userprincipalname, primarysmtpaddress, recipienttypedetails) + $(Get-RemoteMailbox -ResultSize unlimited | select userprincipalname, primarysmtpaddress, recipienttypedetails);
-    $mailboxes | convertto-json > 'C:\cron\mailboxes.json';
-    
     # Read the full user DB from OIM CMS (all DepartmentUser objects) via the OIM CMS API.
     # NOTE: $user_api is set in C:\cron\creds.psm1
     $users = Invoke-RestMethod ("{0}?all" -f $user_api) -WebSession $oimsession -TimeoutSec 300;
@@ -37,7 +33,7 @@ try {
     $keynames = @("Title", "DisplayName", "GivenName", "Surname", "Company", "physicalDeliveryOfficeName", "StreetAddress", 
         "Division", "Department", "Country", "State", "wWWHomePage", "Manager", "EmployeeID", "EmployeeNumber", "HomePhone",
         "telephoneNumber", "Mobile", "Fax", "employeeType");
-    $adprops = $keynames + @("EmailAddress", "UserPrincipalName", "Modified", "AccountExpirationDate", "Info", "pwdLastSet", "targetAddress");
+    $adprops = $keynames + @("EmailAddress", "UserPrincipalName", "Modified", "AccountExpirationDate", "Info", "pwdLastSet", "targetAddress", "msExchRemoteRecipientType", "msExchRecipientTypeDetails");
     
     # Read the user list from AD. Apply a rough filter for accounts we want to load into OIM CMS:
     # - email address is *.wa.gov.au or dpaw.onmicrosoft.com
@@ -207,8 +203,29 @@ try {
                     
                     # If there's an email address change, use Outlook
                     If ($user.email -and ($aduser.emailaddress -ne $user.email)) {
-                        Log $("Updating email address for {0} to {1}" -f $aduser.EmailAddress,$user.email);
-                        Set-RemoteMailbox -Identity $aduser.emailaddress -PrimarySmtpAddress $user.email -EmailAddressPolicyEnabled $false;
+                        Log $("Updating email address for {0} to {1}" -f $aduser.EmailAddress, $user.email);
+                        Set-ADUser -verbose -server $adserver $aduser -EmailAddress $user.email;
+
+                        # scrub older mentions of new primary SMTP
+                        ForEach ($existing in $aduser.proxyAddresses | Where {$_ -like "smtp:"+$user.email}) {
+                            Set-ADUser -verbose -server $adserver $aduser -Remove @{'proxyAddresses'=($existing)};
+                        }
+
+                        # find the current primary SMTP
+                        # it'll either be nothing, or something other than the new primary SMTP
+                        $proxyAddresses = $aduser.proxyAddresses | Where {$_ -notlike "smtp:"+$user.email}
+                        $current_primary = $proxyAddresses | Where {$_ -clike "SMTP:*"} | Select -First 1;
+                        if ($current_primary) {
+                            # move the current primary to a secondary
+                            $current_primary_email = $($current_primary -split 'SMTP:', 2)[1];
+                            if ($current_primary_email) {
+                                Set-ADUser -verbose -server $adserver $aduser -Remove @{'proxyAddresses'=($current_primary)};
+                                Set-ADUser -verbose -server $adserver $aduser -Add @{'proxyAddresses'=('smtp:'+$current_primary_email)};
+                            }
+                        }
+
+                        # add the new primary
+                        Set-ADUser -verbose -server $adserver $aduser -Add @{'proxyAddresses'=('SMTP:'+$user.email)};
                     }
 
                 } catch [System.Exception] {
@@ -221,10 +238,8 @@ try {
             # If the AD object was modified after the OIM CMS object, sync back to the CMS...
             } ElseIf (('Modified' -notin $user.ad_data.Keys) -or ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified))) {
                 #Write-Output $("Looks like {0} was updated in AD after the CMS, updating" -f $user.email);
-                # ...find the mailbox object
-                $mb = $mailboxes | where userprincipalname -like $user.email;
                 # ...glom the mailbox object onto the AD object
-                $simpleuser = $aduser | select ObjectGUID, @{name="mailbox";expression={$mb}}, @{name="Modified";expression={Get-Date $_.Modified -Format o}}, info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
+                $simpleuser = $aduser | select ObjectGUID, @{name="Modified";expression={Get-Date $_.Modified -Format o}}, info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
                 $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
                 if ($aduser.AccountExpirationDate) {
                     $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format o;
@@ -357,16 +372,17 @@ try {
         }
         # ...create new user
         $sam = $msoluser.userprincipalname.split('@')[0].replace('.','').replace('#', '').replace(',', '');
+        # ...assume targetAddress name is the same base as the UPN
+        $rra = $msoluser.UserPrincipalName.Split("@", 2)[0]+"@dpaw.mail.onmicrosoft.com";
+
         Log $("About to create O365 user: New-ADUser $username -Verbose -Path `"$new_user_ou`" -Enabled $true -UserPrincipalName $($msoluser.UserPrincipalName) -SamAccountName $($sam) -EmailAddress $($msoluser.UserPrincipalName) -DisplayName $($msoluser.DisplayName) -GivenName $($msoluser.FirstName) -Surname $($msoluser.LastName) -PasswordNotRequired $true");
-        New-ADUser $username -Verbose -Path $new_user_ou -Enabled $true -UserPrincipalName $msoluser.UserPrincipalName -SamAccountName $sam -EmailAddress $msoluser.UserPrincipalName -DisplayName $msoluser.DisplayName -GivenName $msoluser.FirstName -Surname $msoluser.LastName -PasswordNotRequired $true;
+        New-ADUser -server $adserver -verbose $username -Path $new_user_ou -Enabled $true -UserPrincipalName $msoluser.UserPrincipalName -SamAccountName $sam -EmailAddress $msoluser.UserPrincipalName -DisplayName $msoluser.DisplayName -GivenName $msoluser.FirstName -Surname $msoluser.LastName -PasswordNotRequired $true;
         # ...wait for changes to propagate
         sleep 180;
-        # ...assume RemoteRoutingAddress name is the same base as the UPN
-        $rra = $msoluser.UserPrincipalName.Split("@", 2)[0]+"@dpaw.mail.onmicrosoft.com";
-        Set-ADUser -Identity $sam -Add @{'proxyAddresses'=('SMTP:'+$msoluser.UserPrincipalName)};
-        Set-ADUser -Identity $sam -Add @{'proxyAddresses'=('smtp:'+$rra)};
-        # ...add remotemailbox object
-        Enable-RemoteMailbox -Identity $msoluser.UserPrincipalName -PrimarySmtpAddress $msoluser.UserPrincipalName -RemoteRoutingAddress $rra;
+
+        Set-ADUser -verbose -server $adserver -Identity $sam -Add @{'proxyAddresses'=('SMTP:'+$msoluser.UserPrincipalName)};
+        Set-ADUser -verbose -server $adserver -Identity $sam -Add @{'proxyAddresses'=('smtp:'+$rra)};
+        Set-ADUser -verbose -server $adserver -Identity $sam -Replace @{'targetAddress'=('SMTP:'+$rra)};
     }
 
     ##############
@@ -385,44 +401,44 @@ try {
         $ms = $msolusers | where {$_.immutableId -eq [System.Convert]::ToBase64String($aduser.ObjectGUID.tobytearray())};
         if ($ms -and ($ms.licenses)) {
             $rra = $aduser.EmailAddress.Split("@", 2)[0]+"@dpaw.mail.onmicrosoft.com";
-            Log $("Fixing RemoteMailbox for {0} {1} {2}" -f $aduser.EmailAddress, $aduser.userprincipalname, $rra);
-            Enable-RemoteMailbox -Identity $aduser.userprincipalname -PrimarySmtpAddress $aduser.EmailAddress -RemoteRoutingAddress $rra
-            $aduser | Set-ADUser -Add @{'proxyAddresses'=('smtp:'+$rra)};
+            Log $("Fixing TargetAddress for {0} {1} {2}" -f $aduser.EmailAddress, $aduser.userprincipalname, $rra);
+            $aduser | Set-ADUser -verbose -server $adserver -Replace @{'targetAddress'=('SMTP:'+$rra)};
+            if (-not (('smtp:'+$rra) -in $aduser.proxyAddresses)) {
+                $aduser | Set-ADUser -verbose -server $adserver -Add @{'proxyAddresses'=('smtp:'+$rra)};
+            }
         }
     }
 
     # Rig the UPN for each user account so that it matches the primary SMTP address.
     foreach ($aduser in $adusers | where {$_.emailaddress -and ($_.emailaddress -ne $_.userprincipalname)}) {
         Log $("Changing UPN from {0} to {1}" -f $aduser.UserPrincipalName,$aduser.emailaddress);
-        Set-ADUser $aduser -UserPrincipalName $aduser.emailaddress -Verbose;
+        Set-ADUser -verbose -server $adserver $aduser -UserPrincipalName $aduser.emailaddress -Verbose;
     }
 
-    # Iterate over CMS DepartmentUsers and call Disable-ADAccount for any that have expired.
     foreach ($aduser in $adusers) {
+        # Iterate over CMS DepartmentUsers and call Disable-ADAccount for any that have expired.
         if (($aduser.Enabled -eq $true) -and ($aduser.AccountExpirationDate) -and ($aduser.AccountExpirationDate -lt $(Get-Date))) {
             Log $("Disabling AD account {0}" -f $aduser.EmailAddress);
-            Disable-ADAccount $aduser;
+            Disable-ADAccount -server $adserver $aduser;
+        }
+
+        # For each AD-managed Exchange Online mailbox that doesn't have it, add an archive mailbox:
+        if ($aduser.msExchRemoteRecipientType -in @(1, 4)) {
+            Log $("Adding archive mailbox for {0}" -f $_.userprincipalname);
+            Set-ADUser -verbose -server $adserver $aduser -Replace @{msExchRemoteRecipientType=$($aduser.msExchRemoteRecipientType -bor 2)};
         }
     }
 
-    # For each AD-managed Exchange Online mailbox that doesn't have it, add an archive mailbox:
-    $mailboxes | where recipienttypedetails -like remoteusermailbox | where { $_.archivestatus -eq "None" } | where {-not $_.managedfoldermailboxpolicy} | foreach { 
-        Log $("Adding archive mailbox for {0}" -f $_.userprincipalname);
-        Enable-RemoteMailbox -Identity $_.userprincipalname -Archive;
-    }
 
-    # For each Exchange Online mailbox where it doesn't match, set the PrimarySmtpAddress to match the UserPrincipalName.
-    # We shouldn't have to do this anymore, as 365 has welded UPN to PrimarySmtpAddress.
-    #$mailboxes | where recipienttypedetails -like remoteusermailbox | where { $_.userprincipalname -ne $_.primarysmtpaddress } | foreach { 
-    #    Set-RemoteMailbox $_.userprincipalname -PrimarySmtpAddress $_.userprincipalname -EmailAddressPolicyEnabled $false -Verbose;
-    #}
-
-    # Quick loop to fix RemoteRoutingAddress; previously some RemoteMailbox objects were provisioned manually with the wrong one.
-    ForEach ($mb in Get-RemoteMailbox -ResultSize Unlimited | Where {-not ($_.RemoteRoutingAddress -like "*@dpaw.mail.onmicrosoft.com" )}) {
-        $remote = $mb.EmailAddresses.SmtpAddress | Where {$_ -like "*@dpaw.mail.onmicrosoft.com"} | Select -First 1;
-        If ($remote) {
-            Log $("Fixing remote routing rule for {0} to {1}" -f $mb.PrimarySmtpAddress,$remote);
-            $mb | Set-RemoteMailbox -RemoteRoutingAddress $remote;
+    # Quick loop to fix targetAddress; previously some RemoteMailbox objects were provisioned manually with the wrong one.
+    ForEach ($aduser in $adusers | Where {-not ($_.targetAddress -like "*@dpaw.mail.onmicrosoft.com" )}) {
+        $rra = $($aduser.proxyAddresses | Where {$_ -like "*@dpaw.mail.onmicrosoft.com"} | Select -First 1;
+        If ($rra) {
+            $rra = $($rra -split 'smtp:', 2)[1];
+            if ($rra) {
+                Log $("Fixing target address for {0} to {1}" -f $aduser.EmailAddress, $rra);
+                $aduser | Set-ADUser -verbose -server $adserver -Replace @{'targetAddress'=('SMTP:'+$rra)};
+            }
         }
     }
     Log "Finished";

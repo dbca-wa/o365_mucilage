@@ -47,11 +47,13 @@ $admin_msolgroup = "oim-support-admins@example.com";
 $o365_user = "admin@example.onmicrosoft.com";
 $o365_pass = "password";
 
-# glue to load Exchange 2013 into the current session, and Exchange Online into the $session object
+# local exchange server connection no longer needed
+#. "C:\Program Files\Microsoft\Exchange Server\V15\Bin\RemoteExchange.ps1";
+#Connect-ExchangeServer -Auto;
+
+# glue to load Exchange Online into the $session object
 $cred = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $o365_user, $(ConvertTo-SecureString $o365_pass -AsPlainText -Force);
 Get-PSSession | Remove-PSSession;
-. "C:\Program Files\Microsoft\Exchange Server\V15\Bin\RemoteExchange.ps1";
-Connect-ExchangeServer -Auto;
 $session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri https://outlook.office365.com/powershell-liveid/ -Credential $cred -Authentication Basic -AllowRedirection;
 Connect-MsolService -Credential $cred;
 
