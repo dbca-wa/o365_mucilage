@@ -33,7 +33,8 @@ try {
     $keynames = @("Title", "DisplayName", "GivenName", "Surname", "Company", "physicalDeliveryOfficeName", "StreetAddress", 
         "Division", "Department", "Country", "State", "wWWHomePage", "Manager", "EmployeeID", "EmployeeNumber", "HomePhone",
         "telephoneNumber", "Mobile", "Fax", "employeeType");
-    $adprops = $keynames + @("EmailAddress", "UserPrincipalName", "Modified", "AccountExpirationDate", "Info", "pwdLastSet", "targetAddress", "msExchRemoteRecipientType", "msExchRecipientTypeDetails");
+    $adprops = $keynames + @("EmailAddress", "UserPrincipalName", "Modified", "AccountExpirationDate", "Info", "pwdLastSet", 
+                             "targetAddress", "msExchRemoteRecipientType", "msExchRecipientTypeDetails", "proxyAddresses");
     
     # Read the user list from AD. Apply a rough filter for accounts we want to load into OIM CMS:
     # - email address is *.wa.gov.au or dpaw.onmicrosoft.com
@@ -62,7 +63,7 @@ try {
         if ($cmsUser) {
             # Find any cases where the AD user's email has been changed, and update the CMS user.
             if (-Not ($cmsUser.email -like $aduser.EmailAddress)) {
-                $simpleuser = $aduser | select ObjectGUID, @{name="Modified";expression={Get-Date $_.Modified -Format o}}, info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
+                $simpleuser = $aduser | select ObjectGUID, @{name="Modified";expression={Get-Date $_.Modified -Format o}}, info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet, proxyAddresses;
                 $simpleuser | Add-Member -type NoteProperty -name PasswordMaxAgeDays -value $DefaultmaxPasswordAgeDays;
                 if ($aduser.AccountExpirationDate) {
                     $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format o;
@@ -207,7 +208,7 @@ try {
                     # If there's an email address change, use Outlook
                     If ($user.email -and ($aduser.emailaddress -ne $user.email)) {
                         Log $("Updating email address for {0} to {1}" -f $aduser.EmailAddress, $user.email);
-                        Set-ADUser -verbose -server $adserver $aduser -EmailAddress $user.email;
+                        Set-ADUser -verbose -server $adserver $aduser -EmailAddress $user.email -UserPrincipalName $user.email;
 
                         # scrub older mentions of new primary SMTP
                         ForEach ($existing in $aduser.proxyAddresses | Where {$_ -like "smtp:"+$user.email}) {
@@ -426,16 +427,16 @@ try {
         }
 
         # For each AD-managed Exchange Online mailbox that doesn't have it, add an archive mailbox:
-        if ($aduser.msExchRemoteRecipientType -in @(1, 4)) {
-            Log $("Adding archive mailbox for {0}" -f $_.userprincipalname);
-            Set-ADUser -verbose -server $adserver $aduser -Replace @{msExchRemoteRecipientType=$($aduser.msExchRemoteRecipientType -bor 2)};
-        }
+#        if ($aduser.msExchRemoteRecipientType -in @(1, 4)) {
+#            Log $("Adding archive mailbox for {0}" -f $aduser.userprincipalname);
+#            Set-ADUser -verbose -server $adserver $aduser -Replace @{msExchRemoteRecipientType=$($aduser.msExchRemoteRecipientType -bor 2)};
+#        }
     }
 
 
     # Quick loop to fix targetAddress; previously some RemoteMailbox objects were provisioned manually with the wrong one.
-    ForEach ($aduser in $adusers | Where {-not ($_.targetAddress -like "*@dpaw.mail.onmicrosoft.com" )}) {
-        $rra = $($aduser.proxyAddresses | Where {$_ -like "*@dpaw.mail.onmicrosoft.com"} | Select -First 1;
+    ForEach ($aduser in $adusers | Where {-not ($_.targetAddress -like "*@dpaw.mail.onmicrosoft.com" )} ) {
+        $rra = $aduser.proxyAddresses | Where {$_ -like "*@dpaw.mail.onmicrosoft.com"} | Select -First 1;
         If ($rra) {
             $rra = $($rra -split 'smtp:', 2)[1];
             if ($rra) {
@@ -449,6 +450,7 @@ try {
     Log "ERROR: Exception caught, dying =(";
     $except = $_;
     Log $($except);#| convertto-json);
+    Exit(1);
 }
 
 # Final clean up.
