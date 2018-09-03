@@ -375,18 +375,18 @@ try {
             continue;
         }
         # ...create new user
-        $sam = $msoluser.userprincipalname.split('@')[0].replace('.','').replace('#', '').replace(',', '');
+        #$sam = $msoluser.userprincipalname.split('@')[0].replace('.','').replace('#', '').replace(',', '');
         # ...assume targetAddress name is the same base as the UPN
         $rra = $msoluser.UserPrincipalName.Split("@", 2)[0]+"@dpaw.mail.onmicrosoft.com";
 
-        Log $("About to create O365 user: New-ADUser $username -Verbose -Path `"$new_user_ou`" -Enabled $true -UserPrincipalName $($msoluser.UserPrincipalName) -SamAccountName $($sam) -EmailAddress $($msoluser.UserPrincipalName) -DisplayName $($msoluser.DisplayName) -GivenName $($msoluser.FirstName) -Surname $($msoluser.LastName) -PasswordNotRequired $true");
+        Log $("About to create O365 user: New-ADUser $username -Verbose -Path `"$new_user_ou`" -Enabled $true -UserPrincipalName $($msoluser.UserPrincipalName) -SamAccountName $($username) -EmailAddress $($msoluser.UserPrincipalName) -DisplayName $($msoluser.DisplayName) -GivenName $($msoluser.FirstName) -Surname $($msoluser.LastName) -PasswordNotRequired $true");
         New-ADUser -server $adserver -verbose $username -Path $new_user_ou -Enabled $true -UserPrincipalName $msoluser.UserPrincipalName -SamAccountName $sam -EmailAddress $msoluser.UserPrincipalName -DisplayName $msoluser.DisplayName -GivenName $msoluser.FirstName -Surname $msoluser.LastName -PasswordNotRequired $true;
         # ...wait for changes to propagate
         sleep 180;
 
-        Set-ADUser -verbose -server $adserver -Identity $sam -Add @{'proxyAddresses'=('SMTP:'+$msoluser.UserPrincipalName)};
-        Set-ADUser -verbose -server $adserver -Identity $sam -Add @{'proxyAddresses'=('smtp:'+$rra)};
-        Set-ADUser -verbose -server $adserver -Identity $sam -Replace @{'targetAddress'=('SMTP:'+$rra)};
+        Set-ADUser -verbose -server $adserver -Identity $username -Add @{'proxyAddresses'=('SMTP:'+$msoluser.UserPrincipalName)};
+        Set-ADUser -verbose -server $adserver -Identity $username -Add @{'proxyAddresses'=('smtp:'+$rra)};
+        Set-ADUser -verbose -server $adserver -Identity $username -Replace @{'targetAddress'=('SMTP:'+$rra)};
     }
 
     ##############
@@ -416,7 +416,7 @@ try {
     # Rig the UPN for each user account so that it matches the primary SMTP address.
     foreach ($aduser in $adusers | where {$_.emailaddress -and ($_.emailaddress -ne $_.userprincipalname)}) {
         Log $("Changing UPN from {0} to {1}" -f $aduser.UserPrincipalName,$aduser.emailaddress);
-        Set-ADUser -verbose -server $adserver $aduser -UserPrincipalName $aduser.emailaddress -Verbose;
+        Set-ADUser -verbose -server $adserver $aduser -UserPrincipalName $aduser.emailaddress;
     }
 
     foreach ($aduser in $adusers) {
