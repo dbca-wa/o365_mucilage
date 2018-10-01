@@ -35,13 +35,29 @@ if ($o365_updated) {
 }
 
 # Enforce MFA for all synced users
+$mfa_exclude = Get-MsolGroupMember -GroupObjectId $mfa_exclude;
+
 $mfaauth = New-Object -TypeName Microsoft.Online.Administration.StrongAuthenticationRequirement
 $mfaauth.RelyingParty = "*"
 $mfaauth.State = "Enforced"
-ForEach ($user in ($o365_users | where { ($_.StrongAuthenticationRequirements.State -ne "Enforced") })) {
+
+$users_mfa_off = $o365_users | where { ($_.StrongAuthenticationRequirements.State -eq "Enforced") -and ($mfa_exclude.objectid -contains $_.objectid) };
+$users_mfa_on = $o365_users | where { ($_.StrongAuthenticationRequirements.State -ne "Enforced") -and ($mfa_exclude.objectid -notcontains $_.objectid)};
+
+ForEach ($user in $users_mfa_on) {
     try {
         Log $("Enforcing MFA for {0}" -f $user.UserPrincipalName)
-        Set-MsolUser -UserPrincipalName $user.UserPrincipalName -StrongAuthenticationRequirements $mfaauth
+        Set-MsolUser -UserPrincipalName $user.UserPrincipalName -StrongAuthenticationRequirements $mfaauth;
+    } catch [System.Exception] {
+        Log "ERROR: Couldn't run Set-MsolUser";
+        $except = $_;
+        Log $($except);#| convertto-json);
+    }
+}
+ForEach ($user in $users_mfa_off) {
+    try {
+        Log $("Disabling MFA for {0}" -f $user.UserPrincipalName)
+        Set-MsolUser -UserPrincipalName $user.UserPrincipalName -StrongAuthenticationRequirements @();
     } catch [System.Exception] {
         Log "ERROR: Couldn't run Set-MsolUser";
         $except = $_;
@@ -71,9 +87,15 @@ $cmsusers_updated = $false;
 # set archiving for all cloud mailboxes which don't have it
 $non_archive = $mailboxes | where {$_.ArchiveStatus -eq 'None'} | where {$_.userprincipalname -in $cloud_only.UserPrincipalName} | where {-not $_.managedfoldermailboxpolicy};
 ForEach ($mb in $non_archive) {
-    $email = $mb.PrimarySmtpAddress;
-    Log $("Adding archive mailbox for {0}" -f $email);
-    Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Enable-Mailbox -Identity `"$email`" -Archive"));
+    try {
+        $email = $mb.PrimarySmtpAddress;
+        Log $("Adding archive mailbox for {0}" -f $email);
+        Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Enable-Mailbox -Identity `"$email`" -Archive"));
+    } catch [System.Exception] {
+        Log "ERROR: Couldn't run Enable-Mailbox";
+        $except = $_;
+        Log $($except);
+    }
 }
 
 # set auditing for all mailboxes which don't have it
