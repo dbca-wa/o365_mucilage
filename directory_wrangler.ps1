@@ -157,9 +157,10 @@ try {
         
         If ($aduser) {
             # If the OIM CMS user object was modified in the last hour...
-            if (($(Get-Date) - (New-TimeSpan -Minutes 60)) -lt $(Get-Date $user.date_updated) -and ($aduser.Modified -lt $(Get-Date $user.date_updated))) {
+            if (($(Get-Date) - (New-TimeSpan -Minutes 60)) -lt $(Get-Date $user.date_updated) -and ($aduser.Modified -lt $(Get-Date $user.date_updated) - $(New-TimeSpan -Minutes 5) )) {
                 #Write-Output $("Looks like {0} was modified in the last hour, updating" -f $user.email);
                 # ...set all the properties on the AD object to match the OIM CMS object
+                #Log $("modAD: {0}, modCMS: {1}" -f $aduser.Modified, $(Get-Date $user.date_updated));
 
                 $aduser.Title = $user.title;
                 $aduser.DisplayName, $aduser.GivenName, $aduser.Surname = $user.name, $user.given_name, $user.surname;
@@ -195,15 +196,16 @@ try {
                 }
                 # ...push changes back to AD
                 try {
-                    Log $("Updating AD data with OIM CMS data (newer) for {0}" -f $aduser.EmailAddress);
+                    #Log $("Updating AD data with OIM CMS data (newer) for {0}" -f $aduser.EmailAddress);
                     Set-ADUser -verbose -server $adserver -instance $aduser;
                     # (thumbnailPhoto isn't added as a property of $aduser for some dumb reason, so we have to push it seperately)
-                    if ($user.photo_ad -and $user.photo_ad.startswith('http')) {
-                        Set-ADUser -verbose -server $adserver $aduser -replace @{thumbnailPhoto=$(Invoke-WebRequest $user.photo_ad -WebSession $oimsession).content};
-                    }
-                    else {
-                        Set-ADUser -verbose -server $adserver $aduser -clear thumbnailPhoto;
-                    }
+                    # FIXME: photo_ad is broken in IT assets
+                    #if ($user.photo_ad -and $user.photo_ad.startswith('http')) {
+                    #    Set-ADUser -verbose -server $adserver $aduser -replace @{thumbnailPhoto=$(Invoke-WebRequest $user.photo_ad -WebSession $oimsession).content};
+                    #}
+                    #else {
+                    #    Set-ADUser -verbose -server $adserver $aduser -clear thumbnailPhoto;
+                    #}
                     
                     # If there's an email address change, use Outlook
                     If ($user.email -and ($aduser.emailaddress -ne $user.email)) {
@@ -232,6 +234,10 @@ try {
                         Set-ADUser -verbose -server $adserver $aduser -Add @{'proxyAddresses'=('SMTP:'+$user.email)};
                     }
 
+                    # force a timestamp update
+                    Set-ADUser -server $adserver -identity $aduser.ObjectGUID -replace @{ExtensionAttribute15="test"};
+                    Set-ADUser -server $adserver -identity $aduser.ObjectGUID -clear ExtensionAttribute15;
+
                 } catch [System.Exception] {
                     Log $("ERROR: set-aduser failed on {0}" -f $user.email);
                     Log $($aduser | select $($aduser.ModifiedProperties) | convertto-json);
@@ -240,7 +246,8 @@ try {
                 }
             
             # If the AD object was modified after the OIM CMS object, sync back to the CMS...
-            } ElseIf (('Modified' -notin $user.ad_data.Keys) -or ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified))) {
+            } ElseIf ((-not $user.ad_data.Modified) -or ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified) + (New-Timespan -Minutes 5))) {
+                #Log $("modAD: {0}, modCMS: {1}" -f $aduser.Modified, $(Get-Date $user.ad_data.Modified));
                 #Write-Output $("Looks like {0} was updated in AD after the CMS, updating" -f $user.email);
                 # ...glom the mailbox object onto the AD object
                 $simpleuser = $aduser | select ObjectGUID, @{name="Modified";expression={Get-Date $_.Modified -Format o}}, info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
@@ -380,7 +387,7 @@ try {
         $rra = $msoluser.UserPrincipalName.Split("@", 2)[0]+"@dpaw.mail.onmicrosoft.com";
 
         Log $("About to create O365 user: New-ADUser $username -Verbose -Path `"$new_user_ou`" -Enabled $true -UserPrincipalName $($msoluser.UserPrincipalName) -SamAccountName $($username) -EmailAddress $($msoluser.UserPrincipalName) -DisplayName $($msoluser.DisplayName) -GivenName $($msoluser.FirstName) -Surname $($msoluser.LastName) -PasswordNotRequired $true");
-        New-ADUser -server $adserver -verbose $username -Path $new_user_ou -Enabled $true -UserPrincipalName $msoluser.UserPrincipalName -SamAccountName $sam -EmailAddress $msoluser.UserPrincipalName -DisplayName $msoluser.DisplayName -GivenName $msoluser.FirstName -Surname $msoluser.LastName -PasswordNotRequired $true;
+        New-ADUser -server $adserver -verbose $username -Path $new_user_ou -Enabled $true -UserPrincipalName $msoluser.UserPrincipalName -SamAccountName $username -EmailAddress $msoluser.UserPrincipalName -DisplayName $msoluser.DisplayName -GivenName $msoluser.FirstName -Surname $msoluser.LastName -PasswordNotRequired $true;
         # ...wait for changes to propagate
         sleep 180;
 
