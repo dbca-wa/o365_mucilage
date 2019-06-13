@@ -14,7 +14,7 @@ try {
     # Store the domain max password age in days.
     $DefaultmaxPasswordAgeDays = (Get-ADDefaultDomainPasswordPolicy).MaxPasswordAge.Days;
 
-    # Read the full user DB from OIM CMS (all DepartmentUser objects) via the OIM CMS API.
+    # Read the full user DB from IT Assets (all DepartmentUser objects) via the API.
     # NOTE: $user_api is set in C:\cron\creds.psm1
     $users = Invoke-RestMethod ("{0}?all" -f $user_api) -WebSession $oimsession -TimeoutSec 300;
     # Deserialise response into JSON (bypass the MaxJsonLength property of 2 MB).
@@ -36,7 +36,7 @@ try {
     $adprops = $keynames + @("EmailAddress", "UserPrincipalName", "Modified", "AccountExpirationDate", "Info", "pwdLastSet", 
                              "targetAddress", "msExchRemoteRecipientType", "msExchRecipientTypeDetails", "proxyAddresses");
     
-    # Read the user list from AD. Apply a rough filter for accounts we want to load into OIM CMS:
+    # Read the user list from AD. Apply a rough filter for accounts we want to load into IT Assets:
     # - email address is *.wa.gov.au or dpaw.onmicrosoft.com
     # - DN contains a sub-OU called "Users"
     # - DN does not contain a sub-OU with "Administrators" in the name
@@ -55,7 +55,7 @@ try {
     ##### PUSH AD EMAIL CHANGES TO CMS
     ###################################
 
-    #Write-Output "UPDATING OIM CMS FROM AD DATA";
+    #Write-Output "UPDATING IT ASSETS FROM AD DATA";
     
     ForEach ($aduser in $adusers) {
         # NOTE: we no longer create new CMS DepartmentUser objects here, that happens in cloud_wrangler
@@ -68,22 +68,22 @@ try {
                 if ($aduser.AccountExpirationDate) {
                     $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format o;
                 }
-                # only write back username if enabled for this directory. avoids collisions in OIM CMS
+                # only write back username if enabled for this directory. avoids collisions in IT Assets.
                 if ($dw_writeusername) {
                     $simpleuser | Add-Member -type NoteProperty -name SamAccountName -value $aduser.SamAccountName;
                 }
-                # ...convert the whole lot to JSON and push to OIM CMS via the REST API.
+                # ...convert the whole lot to JSON and push to IT Assets via the REST API.
                 $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
                 $user_update_api = $user_api + '{0}/' -f $simpleuser.ObjectGUID;
                 try {
                     # Invoke the API.
-                    #Log $("Updating OIM CMS data for {0}" -f $cmsUser.email);
+                    #Log $("Updating IT Assets data for {0}" -f $cmsUser.email);
                     #$response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
                     # Note that a change has occurred.
                     $cmsusers_updated = $true;
                 } catch [System.Exception] {
-                    # Log any failures to sync AD data into the OIM CMS, for reference.
-                    Log $("ERROR: updating OIM CMS failed for {0}" -f $cmsUser.email);
+                    # Log any failures to sync AD data into the IT Assets, for reference.
+                    Log $("ERROR: updating IT Assets database failed for {0}" -f $cmsUser.email);
                     Log $("Endpoint: {0}" -f $user_update_api);
                     Log $("Payload: {0}" -f $simpleuser | ConvertTo-Json);
                     $result = $_.Exception.Response.GetResponseStream();
@@ -98,7 +98,7 @@ try {
     }
 
     ###########################
-    ##### OIM CMS 2-WAY UPDATE
+    ##### IT Assets 2-WAY UPDATE
     ###########################
 
     # Get the list of users from the CMS again (if required, following any additions/updates).
@@ -113,8 +113,8 @@ try {
         }
     }
 
-    Write-Output "TIME TO UPDATE AD FROM OIM CMS DATA";
-    # filter OIM CMS DepartmentUsers by whitelisted OrgUnit
+    Write-Output "TIME TO UPDATE AD FROM IT ASSETS DATA";
+    # filter IT Assets DepartmentUsers by whitelisted OrgUnit
     # this is to allow multiple directory writeback
 
     #$department_users = $users.objects | Where {$_.org_data.units.id | Where {$org_whitelist -contains $_} };
@@ -122,7 +122,7 @@ try {
     $department_users = $users.objects | Where {$_.ad_dn -like $domain_dn} | Where {$_.org_data.units.id | Where {$org_global -contains $_} };
     $department_users += $users.objects | Where {-not $_.ad_dn } | Where {$_.org_data.units.id | Where {$org_whitelist -contains $_} };
 
-    # For each OIM CMS DepartmentUser...
+    # For each IT Assets DepartmentUser...
     foreach ($user in $department_users) {
         # ...find the equivalent Active Directory Object.
         If (-Not $user.ad_guid) {
@@ -138,8 +138,8 @@ try {
                     # Note that a change has occurred.
                     $cmsusers_updated = $true;
                 } catch  {
-                    # Log any failures to sync AD data into the OIM CMS, for reference.
-                    Log $("ERROR: updating OIM CMS failed for {0}" -f $user.email);
+                    # Log any failures to sync AD data into the IT Assets db, for reference.
+                    Log $("ERROR: updating IT Assets db failed for {0}" -f $user.email);
                     Log $("Endpoint: {0}" -f $user_update_api);
                     Log $("Payload: {0}" -f $simpleuser | ConvertTo-Json);
                     $result = $_.Exception.Response.GetResponseStream();
@@ -156,10 +156,10 @@ try {
         $aduser = $adusers | where ObjectGUID -eq $($user.ad_guid);
         
         If ($aduser) {
-            # If the OIM CMS user object was modified in the last hour...
+            # If the IT Assets user object was modified in the last hour...
             if (($(Get-Date) - (New-TimeSpan -Minutes 60)) -lt $(Get-Date $user.date_updated) -and ($aduser.Modified -lt $(Get-Date $user.date_updated) - $(New-TimeSpan -Minutes 5) )) {
                 #Write-Output $("Looks like {0} was modified in the last hour, updating" -f $user.email);
-                # ...set all the properties on the AD object to match the OIM CMS object
+                # ...set all the properties on the AD object to match the IT Assets object
                 #Log $("modAD: {0}, modCMS: {1}" -f $aduser.Modified, $(Get-Date $user.date_updated));
 
                 $aduser.Title = $user.title;
@@ -196,7 +196,7 @@ try {
                 }
                 # ...push changes back to AD
                 try {
-                    #Log $("Updating AD data with OIM CMS data (newer) for {0}" -f $aduser.EmailAddress);
+                    #Log $("Updating AD data with IT Assets data (newer) for {0}" -f $aduser.EmailAddress);
                     Set-ADUser -verbose -server $adserver -instance $aduser;
                     # (thumbnailPhoto isn't added as a property of $aduser for some dumb reason, so we have to push it seperately)
                     # FIXME: photo_ad is broken in IT assets
@@ -245,7 +245,7 @@ try {
                     Log $($except | convertto-json);
                 }
             
-            # If the AD object was modified after the OIM CMS object, sync back to the CMS...
+            # If the AD object was modified after the IT Assets object, sync back to the CMS...
             } ElseIf ((-not $user.ad_data.Modified) -or ($aduser.Modified -gt $(Get-Date $user.ad_data.Modified) + (New-Timespan -Minutes 5))) {
                 #Log $("modAD: {0}, modCMS: {1}" -f $aduser.Modified, $(Get-Date $user.ad_data.Modified));
                 #Write-Output $("Looks like {0} was updated in AD after the CMS, updating" -f $user.email);
@@ -255,20 +255,20 @@ try {
                 if ($aduser.AccountExpirationDate) {
                     $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format o;
                 }
-                # only write back username if enabled for this directory. avoids collisions in OIM CMS
+                # only write back username if enabled for this directory. avoids collisions in IT Assets
                 if ($dw_writeusername) {
                     $simpleuser | Add-Member -type NoteProperty -name SamAccountName -value $aduser.SamAccountName;
                 }
-                # ...convert the whole lot to JSON and push to OIM CMS via the REST API.
+                # ...convert the whole lot to JSON and push to IT Assets via the REST API.
                 $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
                 $user_update_api = $user_api + '{0}/' -f $simpleuser.ObjectGUID;
                 try {
                     # Invoke the API.
-                    #Log $("Updating OIM CMS data for {0} from AD data (newer)" -f $user.email);
+                    #Log $("Updating IT Assets data for {0} from AD data (newer)" -f $user.email);
                     #$response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
                 } catch [System.Exception] {
-                    # Log any failures to sync AD data into the OIM CMS, for reference.
-                    Log $("ERROR: updating OIM CMS failed for {0}" -f $cmsUser.email);
+                    # Log any failures to sync AD data into the IT Assets, for reference.
+                    Log $("ERROR: updating IT Assets failed for {0}" -f $cmsUser.email);
                     Log $("Endpoint: {0}" -f $user_update_api);
                     Log $("Payload: {0}" -f $simpleuser | ConvertTo-Json);
                     $result = $_.Exception.Response.GetResponseStream();
@@ -288,11 +288,11 @@ try {
                 try {
                     $user_update_api = $user_api + '{0}/' -f $user.ad_guid;
                     # Invoke the API.
-                    #$response = Invoke-RestMethod $user_update_api -Method Put -Body $jsonbody -ContentType "application/json" -WebSession $oimsession -Verbose;
-                    #Log $("INFO: updated OIM CMS user {0} as deleted in Active Directory" -f $user.email);
+                    $response = Invoke-RestMethod $user_update_api -Method Put -Body $jsonbody -ContentType "application/json" -WebSession $oimsession -Verbose;
+                    Log $("INFO: updated IT Assets user {0} as deleted in Active Directory" -f $user.email);
                 } catch [System.Exception] {
-                    # Log any failures to sync AD data into the OIM CMS, for reference.
-                    Log $("ERROR: failed to update OIM CMS user {0} as deleted in Active Directory" -f $user.email);
+                    # Log any failures to sync AD data into the IT Assets, for reference.
+                    Log $("ERROR: failed to update IT Assets user {0} as deleted in Active Directory" -f $user.email);
                     Log $("Endpoint: {0}" -f $user_update_api);
                     Log $("Payload: {0}" -f $body | ConvertTo-Json);
                     $result = $_.Exception.Response.GetResponseStream();
@@ -305,15 +305,14 @@ try {
             }
         }
 
-        # If the user is disabled in AD but still marked active in the OIM CMS, update the user in the CMS.
+        # If the user is disabled in AD but still marked active in the IT Assets, update the user in the CMS.
         if ($aduser.enabled -eq $false) {
             if ($user.active) {
-                Log $("Marking {0} as 'Inactive' in the OIM CMS" -f $user.email);
                 $simpleuser = $aduser | select ObjectGUID,  info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
                 if ($aduser.AccountExpirationDate) { 
                     $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format o;
                 }
-                # only write back username if enabled for this directory. avoids collisions in OIM CMS
+                # only write back username if enabled for this directory. avoids collisions in IT Assets
                 if ($dw_writeusername) {
                     $simpleuser | Add-Member -type NoteProperty -name SamAccountName -value $aduser.SamAccountName;
                 }
@@ -322,10 +321,11 @@ try {
                 try {
                     $user_update_api = $user_api + '{0}/' -f $simpleuser.ObjectGUID;
                     # Invoke the API.
-                    #$response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -Verbose -WebSession $oimsession;
+                    $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -Verbose -WebSession $oimsession;
+                    Log $("Marked {0} as 'Inactive' in the IT Assets" -f $user.email);
                 } catch [System.Exception] {
-                    # Log any failures to sync AD data into the OIM CMS, for reference.
-                    Log $("ERROR: failed to update {0} as inactive in OIM CMS" -f $user.email);
+                    # Log any failures to sync AD data into the IT Assets, for reference.
+                    Log $("ERROR: failed to update {0} as inactive in IT Assets" -f $user.email);
                     Log $("Endpoint: {0}" -f $user_update_api);
                     Log $("Payload: {0}" -f $simpleuser | ConvertTo-Json);
                     $result = $_.Exception.Response.GetResponseStream();
@@ -363,7 +363,7 @@ try {
     $msolusers = get-msoluser -all | select userprincipalname, lastdirsynctime, @{name="licenses";expression={[string]$_.licenses.accountskuid}}, signinname, immutableid, whencreated, displayname, firstname, lastname;
     $msolusers | convertto-json > 'C:\cron\msolusers.json';
         
-    # For each "In cloud" user in Azure AD which is not directory synced and is part of the OIM CMS org whitelist...
+    # For each "In cloud" user in Azure AD which is not directory synced and is part of the IT Assets org whitelist...
     ForEach ($msoluser in $msolusers | where lastdirsynctime -eq $null | where UserPrincipalName -in $department_users.email) {
         $username = $msoluser.FirstName + $msoluser.LastName;
         if (!$username) {
