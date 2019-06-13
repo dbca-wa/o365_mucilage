@@ -77,8 +77,8 @@ try {
                 $user_update_api = $user_api + '{0}/' -f $simpleuser.ObjectGUID;
                 try {
                     # Invoke the API.
-                    Log $("Updating OIM CMS data for {0}" -f $cmsUser.email);
-                    $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
+                    #Log $("Updating OIM CMS data for {0}" -f $cmsUser.email);
+                    #$response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
                     # Note that a change has occurred.
                     $cmsusers_updated = $true;
                 } catch [System.Exception] {
@@ -134,7 +134,7 @@ try {
                 $user_update_api = $user_api + '{0}/' -f $user.email;
                 try {
                     # Invoke the API.
-                    $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
+                    #$response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
                     # Note that a change has occurred.
                     $cmsusers_updated = $true;
                 } catch  {
@@ -264,8 +264,8 @@ try {
                 $user_update_api = $user_api + '{0}/' -f $simpleuser.ObjectGUID;
                 try {
                     # Invoke the API.
-                    Log $("Updating OIM CMS data for {0} from AD data (newer)" -f $user.email);
-                    $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
+                    #Log $("Updating OIM CMS data for {0} from AD data (newer)" -f $user.email);
+                    #$response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
                 } catch [System.Exception] {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
                     Log $("ERROR: updating OIM CMS failed for {0}" -f $cmsUser.email);
@@ -288,8 +288,8 @@ try {
                 try {
                     $user_update_api = $user_api + '{0}/' -f $user.ad_guid;
                     # Invoke the API.
-                    $response = Invoke-RestMethod $user_update_api -Method Put -Body $jsonbody -ContentType "application/json" -WebSession $oimsession -Verbose;
-                    Log $("INFO: updated OIM CMS user {0} as deleted in Active Directory" -f $user.email);
+                    #$response = Invoke-RestMethod $user_update_api -Method Put -Body $jsonbody -ContentType "application/json" -WebSession $oimsession -Verbose;
+                    #Log $("INFO: updated OIM CMS user {0} as deleted in Active Directory" -f $user.email);
                 } catch [System.Exception] {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
                     Log $("ERROR: failed to update OIM CMS user {0} as deleted in Active Directory" -f $user.email);
@@ -322,7 +322,7 @@ try {
                 try {
                     $user_update_api = $user_api + '{0}/' -f $simpleuser.ObjectGUID;
                     # Invoke the API.
-                    $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -Verbose -WebSession $oimsession;
+                    #$response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -Verbose -WebSession $oimsession;
                 } catch [System.Exception] {
                     # Log any failures to sync AD data into the OIM CMS, for reference.
                     Log $("ERROR: failed to update {0} as inactive in OIM CMS" -f $user.email);
