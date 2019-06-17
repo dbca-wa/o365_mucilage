@@ -165,8 +165,8 @@ try {
                 $aduser.Title = $user.title;
                 $aduser.DisplayName, $aduser.GivenName, $aduser.Surname = $user.name, $user.given_name, $user.surname;
                 $aduser.Company = $user.org_data.cost_centre.code;
-                $aduser.physicalDeliveryOfficeName = $user.org_unit__location__name;
-                $aduser.StreetAddress = $user.org_unit__location__address;
+                $aduser.physicalDeliveryOfficeName = $user.location.name;
+                $aduser.StreetAddress = $user.location.address;
                 #if ($user.org_data.units) {
                 #    $aduser.Division = $user.org_data.units[1].name;
                 #    $aduser.Department = $user.org_data.units[0].name;
