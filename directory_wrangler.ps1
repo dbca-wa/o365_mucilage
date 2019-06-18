@@ -134,7 +134,7 @@ try {
                 $user_update_api = $user_api + '{0}/' -f $user.email;
                 try {
                     # Invoke the API.
-                    #$response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
+                    $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -WebSession $oimsession;
                     # Note that a change has occurred.
                     $cmsusers_updated = $true;
                 } catch  {
@@ -306,34 +306,62 @@ try {
         }
 
         # If the user is disabled in AD but still marked active in the IT Assets, update the user in the CMS.
-        if ($aduser.enabled -eq $false) {
-            if ($user.active) {
-                $simpleuser = $aduser | select ObjectGUID,  info, DistinguishedName, Name, Title, GivenName, Surname, EmailAddress, Enabled, AccountExpirationDate, pwdLastSet;
-                if ($aduser.AccountExpirationDate) { 
-                    $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format o;
-                }
-                # only write back username if enabled for this directory. avoids collisions in IT Assets
-                if ($dw_writeusername) {
-                    $simpleuser | Add-Member -type NoteProperty -name SamAccountName -value $aduser.SamAccountName;
-                }
-                $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
+        if ($aduser) {
+            if ($aduser.enabled -eq $false) {
+                if ($user.active) {
+                    $simpleuser = $aduser | select Enabled, AccountExpirationDate;
+                    if ($aduser.AccountExpirationDate) { 
+                        $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format o;
+                    }
+                    # only write back username if enabled for this directory. avoids collisions in IT Assets
+                    #if ($dw_writeusername) {
+                    #    $simpleuser | Add-Member -type NoteProperty -name SamAccountName -value $aduser.SamAccountName;
+                    #}
+                    $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
                 
-                try {
-                    $user_update_api = $user_api + '{0}/' -f $simpleuser.ObjectGUID;
-                    # Invoke the API.
-                    $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -Verbose -WebSession $oimsession;
-                    Log $("Marked {0} as 'Inactive' in the IT Assets" -f $user.email);
-                } catch [System.Exception] {
-                    # Log any failures to sync AD data into the IT Assets, for reference.
-                    Log $("ERROR: failed to update {0} as inactive in IT Assets" -f $user.email);
-                    Log $("Endpoint: {0}" -f $user_update_api);
-                    Log $("Payload: {0}" -f $simpleuser | ConvertTo-Json);
-                    $result = $_.Exception.Response.GetResponseStream();
-                    $reader = New-Object System.IO.StreamReader($result);
-                    $reader.BaseStream.Position = 0;
-                    $reader.DiscardBufferedData();
-                    $responseBody = $reader.ReadToEnd();
-                    Log $("Response: {0}" -f $responseBody);
+                    try {
+                        $user_update_api = $user_api + '{0}/' -f $aduser.ObjectGUID;
+                        # Invoke the API.
+                        $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -Verbose -WebSession $oimsession;
+                        Log $("Marked {0} as 'Inactive' in the IT Assets" -f $user.email);
+                    } catch [System.Exception] {
+                        # Log any failures to sync AD data into the IT Assets, for reference.
+                        Log $("ERROR: failed to update {0} as inactive in IT Assets" -f $user.email);
+                        Log $("Endpoint: {0}" -f $user_update_api);
+                        Log $("Payload: {0}" -f $simpleuser | ConvertTo-Json);
+                        $result = $_.Exception.Response.GetResponseStream();
+                        $reader = New-Object System.IO.StreamReader($result);
+                        $reader.BaseStream.Position = 0;
+                        $reader.DiscardBufferedData();
+                        $responseBody = $reader.ReadToEnd();
+                        Log $("Response: {0}" -f $responseBody);
+                    }
+                }
+            } else {
+                if (-not $user.active) {
+                    $simpleuser = $aduser | select Enabled, AccountExpirationDate;
+                    if ($aduser.AccountExpirationDate) { 
+                        $simpleuser.AccountExpirationDate = Get-Date $aduser.AccountExpirationDate -Format o;
+                    }
+                    $userjson = [System.Text.Encoding]::UTF8.GetBytes($($simpleuser | ConvertTo-Json));
+
+                    try {
+                        $user_update_api = $user_api + '{0}/' -f $aduser.ObjectGUID;
+                        # Invoke the API.
+                        $response = Invoke-RestMethod $user_update_api -Body $userjson -Method Put -ContentType "application/json" -Verbose -WebSession $oimsession;
+                        Log $("Marked {0} as 'Active' in the IT Assets" -f $user.email);
+                    } catch [System.Exception] {
+                        # Log any failures to sync AD data into the IT Assets, for reference.
+                        Log $("ERROR: failed to update {0} as active in IT Assets" -f $user.email);
+                        Log $("Endpoint: {0}" -f $user_update_api);
+                        Log $("Payload: {0}" -f $simpleuser | ConvertTo-Json);
+                        $result = $_.Exception.Response.GetResponseStream();
+                        $reader = New-Object System.IO.StreamReader($result);
+                        $reader.BaseStream.Position = 0;
+                        $reader.DiscardBufferedData();
+                        $responseBody = $reader.ReadToEnd();
+                        Log $("Response: {0}" -f $responseBody);
+                    }
                 }
             }
         }
