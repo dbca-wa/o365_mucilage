@@ -9,7 +9,7 @@ Function Log {
 }
 
 # download distribution group list from Exchange Online
-$dgrps = Invoke-command -session $session -Command { Get-DistributionGroup -ResultSize unlimited };
+$dgrps = Invoke-command -session $session -Command { Get-DistributionGroup -ResultSize unlimited -Filter "(Alias -like 'db-*')" };
 
 # download user list from Office 365
 $users = Get-MsolUser -All;
@@ -26,7 +26,14 @@ Function smash-groups {
         # get the group's name, clean it up a bit for AD
         $name = $grp.name.Substring(0,[System.Math]::Min(64, $grp.name.Length)).replace("`r", "").replace("`n", " ").TrimEnd();
         $id, $email, $dname, $owner = $grp.id, $grp.email, $grp.name, $grp.owner;
-        
+        $email_sec = $email.split("@")[0]+"-orgunit@"+$email.split("@")[1];
+
+        If ((-not $owner) -or ($owner -eq 'support@dbca.wa.gov.au')) {
+            $owner = "`"admin@dbca.wa.gov.au`"";
+        } else {
+            $owner = "`"$owner`""
+        }
+
         # hack to avoid updating groups for domains in transit
         $domain = $email.Split('@', 2)[1];
         If ($domain -in $domain_skip) {
@@ -59,19 +66,22 @@ Function smash-groups {
 
         # set most of the attributes of the AD and Outlook Online groups to match OIM CMS
         $mtip = "Please contact the Office for Information Management (OIM) to correct membership information for this group.";
-        try {
-            Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-DistributionGroup `"$id`" -Name `"$name`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy `"$owner`" -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
-        } catch [System.Exception] {
-            # bump email and try again
-            $email = $email.split("@")[0]+"-orgunit@"+$email.split("@")[1];
-            Log "Set-DistributionGroup `"$id`" -Name `"$name`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy `"$owner`" -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false";
+
+        If (($ogroup.alias -ne $id) -or -not (($ogroup.primarysmtpaddress -eq $email) -or ($ogroup.primarysmtpaddress -eq $email_sec)) -or ($ogroup.displayname -ne $dname)) {
+
             try {
-                Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-DistributionGroup `"$id`" -Name `"$name`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy `"$owner`" -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
+                Log "Set-DistributionGroup `"$id`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy $owner -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false";
+                Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-DistributionGroup `"$id`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email`" -ManagedBy $owner -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
             } catch [System.Exception] {
-                Log "Failed to update distribution group, need to manually check!";
+                # bump email and try again
+                Log "Set-DistributionGroup `"$id`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email_sec`" -ManagedBy $owner -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false";
+                try {
+                    Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create( "Set-DistributionGroup `"$id`" -DisplayName `"$dname`" -PrimarySmtpAddress `"$email_sec`" -ManagedBy $owner -MailTip `"$mtip`" -BypassSecurityGroupManagerCheck -Confirm:`$false"));
+                } catch [System.Exception] {
+                    Log "Failed to update distribution group, need to manually check!";
+                }
             }
         }
-
         
         $missing = $grp.members | Where {$_ -notin $users.UserPrincipalName};
         If ($missing) {
