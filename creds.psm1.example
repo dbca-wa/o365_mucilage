@@ -47,6 +47,14 @@ $admin_msolgroup = "oim-support-admins@example.com";
 $o365_user = "admin@example.onmicrosoft.com";
 $o365_pass = "password";
 
+# object ID of the Office 365 security group containing users to be whitelisted from MFA
+# (in our case this is the NoMFA group, but O365 powershell doesn't provide a stable API for matching by name)
+$mfa_exclude = "00000000-0000-0000-0000-000000000000";
+
+# object ID of the Office 365 security group containing users to be whitelisted from litigation hold
+# (in our case this is the NoLitigationHold group, but O365 powershell doesn't provide a stable API for matching by name)
+$lithold_exclude = "00000000-0000-0000-0000-000000000000";
+
 # local exchange server connection no longer needed
 #. "C:\Program Files\Microsoft\Exchange Server\V15\Bin\RemoteExchange.ps1";
 #Connect-ExchangeServer -Auto;

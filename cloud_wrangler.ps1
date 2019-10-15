@@ -101,19 +101,49 @@ ForEach ($mb in $non_archive) {
 # set auditing for all mailboxes which don't have it
 $non_audit = $mailboxes | where {-not $_.AuditEnabled};
 ForEach ($mb in $non_audit) {
-    $email = $mb.PrimarySmtpAddress;
-    Log $("Adding access audit rules for {0}" -f $email);
-    Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-Mailbox -Identity `"$email`" -AuditEnabled `$true -AuditAdmin 'SendAs' -AuditDelegate 'SendAs' -AuditOwner 'MailboxLogin' "));
+    try {
+        $email = $mb.PrimarySmtpAddress;
+        Log $("Adding access audit rules for {0}" -f $email);
+        Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-Mailbox -Identity `"$email`" -AuditEnabled `$true -AuditAdmin 'SendAs' -AuditDelegate 'SendAs' -AuditOwner 'MailboxLogin' "));
+    } catch [System.Exception] {
+        Log "ERROR: Couldn't enable acces audit rules";
+        $except = $_;
+        Log $($except);
+    }
 }
+
+# get exclusions for litigation hold (required for programmatic mailboxes with a high throughput)
+$lithold_exclude = Get-MsolGroupMember -GroupObjectId $lithold_exclude;
+
 
 
 # set litigation hold for all mailboxes which don't have it
-$non_hold = $mailboxes | where {($_.RecipientTypeDetails -eq "UserMailbox") -and (-not $_.LitigationHoldEnabled)};
-ForEach ($mb in $non_hold) {
-    $email = $mb.PrimarySmtpAddress;
-    Log $("Adding litigation hold rule for {0}" -f $email);
-    Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-Mailbox -Identity `"$email`" -LitigationHoldEnabled `$true"));
+$lithold_on = $mailboxes | where {($_.RecipientTypeDetails -eq "UserMailbox") -and (-not $_.LitigationHoldEnabled) -and ($lithold_exclude.objectid -notcontains $_.externaldirectoryobjectid)};
+$lithold_off = $mailboxes | where {($_.RecipientTypeDetails -eq "UserMailbox") -and ($_.LitigationHoldEnabled) -and ($lithold_exclude.objectid -contains $_.externaldirectoryobjectid)};
+ForEach ($mb in $lithold_on) {
+    try {
+        $email = $mb.PrimarySmtpAddress;
+        Log $("Adding litigation hold rule for {0}" -f $email);
+        Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-Mailbox -Identity `"$email`" -LitigationHoldEnabled `$true"));
+    } catch [System.Exception] {
+        Log "ERROR: Couldn't enable litigation hold";
+        $except = $_;
+        Log $($except);
+    }
 }
+ForEach ($mb in $lithold_off) {
+    try {
+        $email = $mb.PrimarySmtpAddress;
+        Log $("Removing litigation hold rule for {0}" -f $email);
+        Invoke-command -session $session -ScriptBlock $([ScriptBlock]::Create("Set-Mailbox -Identity `"$email`" -LitigationHoldEnabled `$false"));
+    } catch [System.Exception] {
+        Log "ERROR: Couldn't disable litigation hold";
+        $except = $_;
+        Log $($except);
+    }
+}
+
+
 
 $untracked_users = $o365_users | where {$_.userprincipalname -notin $users.objects.email};
 
