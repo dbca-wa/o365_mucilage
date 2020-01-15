@@ -1,8 +1,8 @@
 ﻿# OIM CMS private API endpoint for users
-$user_api = "https://oim_cms.example.com/api/users";
+$user_api = "https://itassets.dbca.wa.gov.au/api/users/";
 
 # hostname of nearest Active Directory DC
-$adserver = "dc-001";
+$adserver = "...";
 
 # OU definition used by group_wrangler to create shadow AD copies of groups managed by Exchange Online
 $mail_security_ou = "example.com/Groups/MailSecurity";
@@ -14,13 +14,13 @@ $cost_centre_ou = "example.com/Groups/CostCentre";
 $location_ou = "example.com/Groups/Location";
 
 # OU definitions used by directory_wrangler to sync AD user objects with OIM CMS DepartmentUsers
-$user_ous = ("OU=Users,OU=GroupA,DC=example,DC=com", "OU=Users,OU=GroupB,DC=example,DC=com");
+$user_ous = @("OU=Users,OU=example,DC=example,DC=com");# "OU=Users,OU=DER,DC=example,DC=com");
 
 # Default OU to put new users into
-$new_user_ou = "OU=Users,OU=GroupA,DC=example,DC=com";
+$new_user_ou = "OU=Users,OU=example,DC=example,DC=com";
 
 # Domain DN to filter OIM CMS ad_dn against
-$domain_DN = "*,DC=example,DC=com";
+$domain_dn = "*,DC=example,DC=com";
 
 # directory wrangler steps 
 $dw_aadsync = $true;
@@ -39,11 +39,15 @@ $org_global = @(
     1
 );
 
+$domain_skip = @(
+    'example-old1.com',
+    'example-old2.com'
+);
+
 # PrimarySMTPAddress of Exchange Online group containing admin users
 $admin_msolgroup = "oim-support-admins@example.com";
 
-
-# office 365 admin credentials
+# Office 365 admin credentials
 $o365_user = "admin@example.onmicrosoft.com";
 $o365_pass = "password";
 
@@ -55,13 +59,11 @@ $mfa_exclude = "00000000-0000-0000-0000-000000000000";
 # (in our case this is the NoLitigationHold group, but O365 powershell doesn't provide a stable API for matching by name)
 $lithold_exclude = "00000000-0000-0000-0000-000000000000";
 
-# local exchange server connection no longer needed
+# Glue to load Exchange 2013 into the current session, and Exchange Online into the $session object
+$cred = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $o365_user, $(ConvertTo-SecureString $o365_pass -AsPlainText -Force);
+#Get-PSSession | Remove-PSSession;
 #. "C:\Program Files\Microsoft\Exchange Server\V15\Bin\RemoteExchange.ps1";
 #Connect-ExchangeServer -Auto;
-
-# glue to load Exchange Online into the $session object
-$cred = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $o365_user, $(ConvertTo-SecureString $o365_pass -AsPlainText -Force);
-Get-PSSession | Remove-PSSession;
 $session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri https://outlook.office365.com/powershell-liveid/ -Credential $cred -Authentication Basic -AllowRedirection;
 Connect-MsolService -Credential $cred;
 
@@ -69,6 +71,7 @@ Connect-MsolService -Credential $cred;
 $basicAuthValue = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("user:pass"));
 $authHeaders = @{Authorization = "Basic $basicAuthValue"};
 
-Invoke-WebRequest "https://oim.dpaw.wa.gov.au/auth" -Headers $authHeaders -SessionVariable oimsession;
+Invoke-WebRequest "https://authome.dbca.wa.gov.au/sso/auth" -Headers $authHeaders -SessionVariable oimsession;
+#Invoke-WebRequest "https://oim.dbca.wa.gov.au/auth" -Headers $authHeaders -SessionVariable oimsession;
 
 Export-ModuleMember -Function * -Variable *;
