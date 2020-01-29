@@ -16,7 +16,7 @@ try {
 
     # Read the full user DB from IT Assets (all DepartmentUser objects) via the API.
     # NOTE: $user_api is set in C:\cron\creds.psm1
-    $users = Invoke-RestMethod ("{0}fast/?all=true" -f $user_api) -WebSession $oimsession -TimeoutSec 300;
+    $users = Invoke-RestMethod ("{0}fast/?all=true" -f $user_api) -TimeoutSec 300;
     # Deserialise response into JSON (bypass the MaxJsonLength property of 2 MB).
     if (-not $users.objects) {
         [void][System.Reflection.Assembly]::LoadWithPartialName("System.Web.Extensions");
@@ -103,7 +103,7 @@ try {
 
     # Get the list of users from the CMS again (if required, following any additions/updates).
     if ($cmsusers_updated) {
-        $users = Invoke-RestMethod ("{0}?all" -f $user_api) -WebSession $oimsession -TimeoutSec 300;
+        $users = Invoke-RestMethod ("{0}?all" -f $user_api) -TimeoutSec 300;
         # Deserialise response into JSON (bypass the MaxJsonLength property of 2 MB).
         if (-not $users.objects) {
             [void][System.Reflection.Assembly]::LoadWithPartialName("System.Web.Extensions");
