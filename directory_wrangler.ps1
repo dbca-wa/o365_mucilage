@@ -388,7 +388,7 @@ try {
 
     # Finally, we want to do some operations on Office 365 accounts not handled by AADSync.
     # Start by reading the full user list.
-    $msolusers = get-msoluser -all | select userprincipalname, lastdirsynctime, @{name="licenses";expression={[string]$_.licenses.accountskuid}}, signinname, immutableid, whencreated, displayname, firstname, lastname;
+    $msolusers = get-msoluser -all | where {[string]$_.licenses.accountskuid -like "*ENTERPRISEPREMIUM*"} | select userprincipalname, lastdirsynctime, @{name="licenses";expression={[string]$_.licenses.accountskuid}}, signinname, immutableid, whencreated, displayname, firstname, lastname;
     $msolusers | convertto-json > 'C:\cron\msolusers.json';
         
     # For each "In cloud" user in Azure AD which is not directory synced and is part of the IT Assets org whitelist...

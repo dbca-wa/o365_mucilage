@@ -14,7 +14,7 @@ Log "Loading cloud information...";
 $mailboxes = Invoke-command -session $session -Command { Get-Mailbox -ResultSize unlimited };
 
 # get all of the users from 365
-$o365_users = Get-MsolUser -All;
+$o365_users = Get-MsolUser -All | where {[string]$_.licenses.accountskuid -like "*ENTERPRISEPREMIUM*"};
 $o365_map = @{};
 ForEach ($user in $o365_users) {
     $o365_map[$user.userprincipalname] = $user;
